@@ -25,41 +25,160 @@ import (
 
 // AlertSpec defines the desired state of Alert
 type AlertSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// Policy information
+	// +kubebuilder:validation:Required
+	PolicyID string `json:"policyId"`
 
-	// foo is an example field of Alert. Edit alert_types.go to remove/update
+	// +kubebuilder:validation:Required
+	PolicyName string `json:"policyName"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=CRITICAL;HIGH;MEDIUM;LOW
+	PolicySeverity string `json:"policySeverity"`
+
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	PolicyDescription string `json:"policyDescription,omitempty"`
+
+	// +optional
+	PolicyCategories []string `json:"policyCategories,omitempty"`
+
+	// Lifecycle stage when the violation was detected
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=DEPLOY;RUNTIME
+	LifecycleStage string `json:"lifecycleStage"`
+
+	// Entity that violated the policy
+	// +optional
+	Entity *AlertEntity `json:"entity,omitempty"`
+
+	// Violation details
+	// +optional
+	Violations []Violation `json:"violations,omitempty"`
+
+	// When this alert occurred
+	// +kubebuilder:validation:Required
+	Time metav1.Time `json:"time"`
+
+	// When this alert was first triggered
+	// +optional
+	FirstOccurred *metav1.Time `json:"firstOccurred,omitempty"`
 }
 
-// AlertStatus defines the observed state of Alert.
-type AlertStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the Alert resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
-	// +listType=map
-	// +listMapKey=type
+// AlertEntity describes the Kubernetes entity that violated the policy
+type AlertEntity struct {
+	// Type of entity (Deployment, Pod, Image, Node, Resource)
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Type string `json:"type,omitempty"`
+
+	// Deployment information
+	// +optional
+	Deployment *DeploymentInfo `json:"deployment,omitempty"`
+
+	// Image information
+	// +optional
+	Image *ImageInfo `json:"image,omitempty"`
+
+	// Resource information
+	// +optional
+	Resource *ResourceInfo `json:"resource,omitempty"`
+}
+
+// DeploymentInfo contains deployment details
+type DeploymentInfo struct {
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// +optional
+	ID string `json:"id,omitempty"`
+
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// +optional
+	ClusterName string `json:"clusterName,omitempty"`
+
+	// +optional
+	ClusterID string `json:"clusterId,omitempty"`
+}
+
+// ImageInfo contains image details
+type ImageInfo struct {
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// +optional
+	ID string `json:"id,omitempty"`
+}
+
+// ResourceInfo contains generic resource details
+type ResourceInfo struct {
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// +optional
+	Name string `json:"name,omitempty"`
+}
+
+// Violation describes a specific policy violation
+type Violation struct {
+	// Human-readable violation message
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Type of violation
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// Additional violation attributes
+	// +optional
+	KeyValueAttrs []KeyValueAttr `json:"keyValueAttrs,omitempty"`
+}
+
+// KeyValueAttr is a key-value pair for violation details
+type KeyValueAttr struct {
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
+
+	// +kubebuilder:validation:Required
+	Value string `json:"value"`
+}
+
+// AlertStatus defines the observed state of Alert
+type AlertStatus struct {
+	// Current state of the alert
+	// +kubebuilder:validation:Enum=ACTIVE;RESOLVED;ATTEMPTED
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// When the alert was resolved
+	// +optional
+	ResolvedAt *metav1.Time `json:"resolvedAt,omitempty"`
+
+	// Note explaining resolution
+	// +optional
+	ResolutionNote string `json:"resolutionNote,omitempty"`
+
+	// Enforcement action taken
+	// +optional
+	EnforcementAction string `json:"enforcementAction,omitempty"`
+
+	// Number of times enforcement was applied
+	// +optional
+	EnforcementCount int `json:"enforcementCount,omitempty"`
+
+	// Current condition message
+	// +optional
+	ConditionMessage string `json:"conditionMessage,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:path=alerts,scope=Namespaced
+// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.policyName`
+// +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.spec.policySeverity`
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Lifecycle",type=string,JSONPath=`.spec.lifecycleStage`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.spec.time`
 
 // Alert is the Schema for the alerts API
 type Alert struct {

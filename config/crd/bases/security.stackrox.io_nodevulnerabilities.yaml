@@ -12,9 +12,31 @@ spec:
     listKind: NodeVulnerabilityList
     plural: nodevulnerabilities
     singular: nodevulnerability
-  scope: Namespaced
+  scope: Cluster
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    - jsonPath: .spec.osImage
+      name: OS
+      type: string
+    - jsonPath: .spec.summary.critical.total
+      name: Critical
+      type: integer
+    - jsonPath: .spec.summary.high.total
+      name: High
+      type: integer
+    - jsonPath: .spec.summary.total
+      name: Total
+      type: integer
+    - jsonPath: .spec.summary.fixableTotal
+      name: Fixable
+      type: integer
+    - jsonPath: .spec.scanTime
+      name: Scanned
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: NodeVulnerability is the Schema for the nodevulnerabilities API
@@ -37,88 +59,173 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of NodeVulnerability
+            description: NodeVulnerabilitySpec defines the desired state of NodeVulnerability
             properties:
-              foo:
-                description: foo is an example field of NodeVulnerability. Edit nodevulnerability_types.go
-                  to remove/update
+              architecture:
                 type: string
-            type: object
-          status:
-            description: status defines the observed state of NodeVulnerability
-            properties:
-              conditions:
-                description: |-
-                  conditions represent the current state of the NodeVulnerability resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+              containerRuntime:
+                type: string
+              cves:
+                description: Top CVEs (limited to prevent resource bloat)
                 items:
-                  description: Condition contains details for one aspect of the current
-                    state of this API Resource.
+                  description: CVE describes a vulnerability
                   properties:
-                    lastTransitionTime:
-                      description: |-
-                        lastTransitionTime is the last time the condition transitioned from one status to another.
-                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                    component:
+                      description: Component describes a vulnerable software component
+                      properties:
+                        location:
+                          type: string
+                        name:
+                          type: string
+                        version:
+                          type: string
+                      type: object
+                    cve:
+                      pattern: ^CVE-[0-9]{4}-[0-9]+$
+                      type: string
+                    cvss:
+                      description: CVSS score (0-10)
+                      type: string
+                    cvssV3:
+                      description: CVSSv3 contains CVSS v3 scoring
+                      properties:
+                        score:
+                          type: string
+                        vector:
+                          type: string
+                      required:
+                      - score
+                      - vector
+                      type: object
+                    discoveredInImage:
                       format: date-time
                       type: string
-                    message:
-                      description: |-
-                        message is a human readable message indicating details about the transition.
-                        This may be an empty string.
-                      maxLength: 32768
+                    epss:
+                      description: EPSS contains Exploit Prediction Scoring System
+                        data
+                      properties:
+                        percentile:
+                          type: string
+                        score:
+                          type: string
+                      required:
+                      - percentile
+                      - score
+                      type: object
+                    fixable:
+                      type: boolean
+                    fixedBy:
+                      description: Version that fixes this CVE
                       type: string
-                    observedGeneration:
-                      description: |-
-                        observedGeneration represents the .metadata.generation that the condition was set based upon.
-                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
-                        with respect to the current state of the instance.
-                      format: int64
-                      minimum: 0
-                      type: integer
-                    reason:
-                      description: |-
-                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
-                        Producers of specific condition types may define expected values and meanings for this field,
-                        and whether the values are considered a guaranteed API.
-                        The value should be a CamelCase string.
-                        This field may not be empty.
-                      maxLength: 1024
-                      minLength: 1
-                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                    link:
                       type: string
-                    status:
-                      description: status of the condition, one of True, False, Unknown.
+                    published:
+                      format: date-time
+                      type: string
+                    severity:
                       enum:
-                      - "True"
-                      - "False"
-                      - Unknown
+                      - CRITICAL
+                      - HIGH
+                      - MEDIUM
+                      - LOW
                       type: string
-                    type:
-                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
-                      maxLength: 316
-                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                    state:
+                      enum:
+                      - OBSERVED
+                      - DEFERRED
+                      - FALSE_POSITIVE
+                      type: string
+                    summary:
                       type: string
                   required:
-                  - lastTransitionTime
-                  - message
-                  - reason
-                  - status
-                  - type
+                  - cve
+                  - severity
                   type: object
+                  x-kubernetes-validations:
+                  - rule: "true"
+                maxItems: 100
                 type: array
-                x-kubernetes-list-map-keys:
-                - type
-                x-kubernetes-list-type: map
+              kernelVersion:
+                type: string
+              kubeletVersion:
+                type: string
+              nodeName:
+                description: Node identification
+                type: string
+              osImage:
+                type: string
+              scanTime:
+                description: When the node was last scanned
+                format: date-time
+                type: string
+              summary:
+                description: CVE summary by severity
+                properties:
+                  critical:
+                    description: SeverityCount counts vulnerabilities at a severity
+                      level
+                    properties:
+                      fixable:
+                        type: integer
+                      total:
+                        type: integer
+                    required:
+                    - fixable
+                    - total
+                    type: object
+                  fixableTotal:
+                    type: integer
+                  high:
+                    description: SeverityCount counts vulnerabilities at a severity
+                      level
+                    properties:
+                      fixable:
+                        type: integer
+                      total:
+                        type: integer
+                    required:
+                    - fixable
+                    - total
+                    type: object
+                  low:
+                    description: SeverityCount counts vulnerabilities at a severity
+                      level
+                    properties:
+                      fixable:
+                        type: integer
+                      total:
+                        type: integer
+                    required:
+                    - fixable
+                    - total
+                    type: object
+                  medium:
+                    description: SeverityCount counts vulnerabilities at a severity
+                      level
+                    properties:
+                      fixable:
+                        type: integer
+                      total:
+                        type: integer
+                    required:
+                    - fixable
+                    - total
+                    type: object
+                  total:
+                    type: integer
+                required:
+                - fixableTotal
+                - total
+                type: object
+            required:
+            - nodeName
+            - osImage
+            - scanTime
+            - summary
             type: object
-        required:
-        - spec
+          status:
+            description: NodeVulnerabilityStatus defines the observed state of NodeVulnerability
+            type: object
         type: object
     served: true
     storage: true
