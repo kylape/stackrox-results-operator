@@ -1,4 +1,7 @@
 ## Append samples of your project ##
 resources:
 - results_v1alpha1_resultsexporter.yaml
+- security_v1alpha1_alert.yaml
+- security_v1alpha1_imagevulnerability.yaml
+- security_v1alpha1_nodevulnerability.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

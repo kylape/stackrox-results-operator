@@ -19,4 +19,28 @@ resources:
   kind: ResultsExporter
   path: github.com/kylape/stackrox-results-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: stackrox.io
+  group: security
+  kind: Alert
+  path: github.com/kylape/stackrox-results-operator/api/security/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: stackrox.io
+  group: security
+  kind: ImageVulnerability
+  path: github.com/kylape/stackrox-results-operator/api/security/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: stackrox.io
+  group: security
+  kind: NodeVulnerability
+  path: github.com/kylape/stackrox-results-operator/api/security/v1alpha1
+  version: v1alpha1
 version: "3"
