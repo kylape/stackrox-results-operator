@@ -15,16 +15,16 @@ import (
 
 // ImageScan represents an image scan result from Central
 type ImageScan struct {
-	Image        *Image       `json:"image"`
-	ScanTime     string       `json:"scanTime"`
-	Components   []*Component `json:"components,omitempty"`
-	CVEs         []*CVE       `json:"cves,omitempty"`
-	Summary      *VulnSummary `json:"summary,omitempty"`
+	Image      *Image       `json:"image"`
+	ScanTime   string       `json:"scanTime"`
+	Components []*Component `json:"components,omitempty"`
+	CVEs       []*CVE       `json:"cves,omitempty"`
+	Summary    *VulnSummary `json:"summary,omitempty"`
 }
 
 type Image struct {
-	ID       string      `json:"id"`
-	Name     *ImageName  `json:"name"`
+	ID       string         `json:"id"`
+	Name     *ImageName     `json:"name"`
 	Metadata *ImageMetadata `json:"metadata,omitempty"`
 }
 
@@ -50,19 +50,19 @@ type Component struct {
 }
 
 type CVE struct {
-	CVE                string      `json:"cve"`
-	Summary            string      `json:"summary,omitempty"`
-	Link               string      `json:"link,omitempty"`
-	Severity           string      `json:"severity"`
-	CVSS               string      `json:"cvss,omitempty"`
-	CVSSv3             *CVSSv3     `json:"cvssV3,omitempty"`
-	Component          *Component  `json:"component,omitempty"`
-	Fixable            bool        `json:"fixedBy,omitempty"` // True if fixedBy is not empty
-	FixedBy            string      `json:"fixedBy,omitempty"`
-	Published          string      `json:"publishedOn,omitempty"`
-	DiscoveredInImage  string      `json:"discoveredInImage,omitempty"`
-	State              string      `json:"state,omitempty"`
-	EPSS               *EPSS       `json:"epss,omitempty"`
+	CVE               string     `json:"cve"`
+	Summary           string     `json:"summary,omitempty"`
+	Link              string     `json:"link,omitempty"`
+	Severity          string     `json:"severity"`
+	CVSS              string     `json:"cvss,omitempty"`
+	CVSSv3            *CVSSv3    `json:"cvssV3,omitempty"`
+	Component         *Component `json:"component,omitempty"`
+	Fixable           bool       `json:"fixable,omitempty"`
+	FixedBy           string     `json:"fixedBy,omitempty"`
+	Published         string     `json:"publishedOn,omitempty"`
+	DiscoveredInImage string     `json:"discoveredInImage,omitempty"`
+	State             string     `json:"state,omitempty"`
+	EPSS              *EPSS      `json:"epss,omitempty"`
 }
 
 type CVSSv3 struct {
@@ -76,12 +76,12 @@ type EPSS struct {
 }
 
 type VulnSummary struct {
-	TotalCVEs         int            `json:"totalCves,omitempty"`
-	FixableCVEs       int            `json:"fixableCves,omitempty"`
-	CriticalSeverity  *SeverityCount `json:"criticalSeverity,omitempty"`
-	HighSeverity      *SeverityCount `json:"highSeverity,omitempty"`
-	MediumSeverity    *SeverityCount `json:"mediumSeverity,omitempty"`
-	LowSeverity       *SeverityCount `json:"lowSeverity,omitempty"`
+	TotalCVEs        int            `json:"totalCves,omitempty"`
+	FixableCVEs      int            `json:"fixableCves,omitempty"`
+	CriticalSeverity *SeverityCount `json:"criticalSeverity,omitempty"`
+	HighSeverity     *SeverityCount `json:"highSeverity,omitempty"`
+	MediumSeverity   *SeverityCount `json:"mediumSeverity,omitempty"`
+	LowSeverity      *SeverityCount `json:"lowSeverity,omitempty"`
 }
 
 type SeverityCount struct {

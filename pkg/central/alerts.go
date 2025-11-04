@@ -18,17 +18,17 @@ import (
 // Alert represents an alert from Central API
 // This is the API response format, which we'll convert to our CRD format
 type Alert struct {
-	ID                string                 `json:"id"`
-	Policy            *Policy                `json:"policy"`
-	LifecycleStage    string                 `json:"lifecycleStage"`
-	Entity            *AlertEntity           `json:"entity,omitempty"`
-	Violations        []*Violation           `json:"violations,omitempty"`
-	Time              string                 `json:"time"`
-	FirstOccurred     string                 `json:"firstOccurred,omitempty"`
-	State             string                 `json:"state,omitempty"`
-	ResolvedAt        string                 `json:"resolvedAt,omitempty"`
-	EnforcementAction string                 `json:"enforcementAction,omitempty"`
-	EnforcementCount  int                    `json:"enforcementCount,omitempty"`
+	ID                string       `json:"id"`
+	Policy            *Policy      `json:"policy"`
+	LifecycleStage    string       `json:"lifecycleStage"`
+	Entity            *AlertEntity `json:"entity,omitempty"`
+	Violations        []*Violation `json:"violations,omitempty"`
+	Time              string       `json:"time"`
+	FirstOccurred     string       `json:"firstOccurred,omitempty"`
+	State             string       `json:"state,omitempty"`
+	ResolvedAt        string       `json:"resolvedAt,omitempty"`
+	EnforcementAction string       `json:"enforcementAction,omitempty"`
+	EnforcementCount  int          `json:"enforcementCount,omitempty"`
 }
 
 type Policy struct {
@@ -40,10 +40,10 @@ type Policy struct {
 }
 
 type AlertEntity struct {
-	Type       string             `json:"type,omitempty"`
-	Deployment *DeploymentInfo    `json:"deployment,omitempty"`
-	Image      *ImageInfo         `json:"image,omitempty"`
-	Resource   *ResourceInfo      `json:"resource,omitempty"`
+	Type       string          `json:"type,omitempty"`
+	Deployment *DeploymentInfo `json:"deployment,omitempty"`
+	Image      *ImageInfo      `json:"image,omitempty"`
+	Resource   *ResourceInfo   `json:"resource,omitempty"`
 }
 
 type DeploymentInfo struct {
@@ -205,10 +205,10 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 	// Set metadata
 	alert.Name = generateAlertName(a)
 	alert.Labels = map[string]string{
-		"stackrox.io/alert-id":     a.ID,
-		"stackrox.io/policy-name":  sanitizeLabelValue(a.Policy.Name),
-		"stackrox.io/severity":     a.Policy.Severity,
-		"stackrox.io/lifecycle":    a.LifecycleStage,
+		"stackrox.io/alert-id":    a.ID,
+		"stackrox.io/policy-name": sanitizeLabelValue(a.Policy.Name),
+		"stackrox.io/severity":    a.Policy.Severity,
+		"stackrox.io/lifecycle":   a.LifecycleStage,
 	}
 
 	// Policy categories

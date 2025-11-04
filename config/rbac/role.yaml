@@ -5,6 +5,15 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - results.stackrox.io
   resources:
   - resultsexporters
@@ -30,3 +39,19 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - security.stackrox.io
+  resources:
+  - alerts
+  - clustersecurityresults
+  - imagevulnerabilities
+  - nodevulnerabilities
+  - securityresults
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
