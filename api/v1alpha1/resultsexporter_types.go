@@ -216,9 +216,9 @@ type ResultsExporterStatus struct {
 
 // ExportedResourceCounts tracks how many resources have been exported
 type ExportedResourceCounts struct {
-	Alerts                 int `json:"alerts"`
-	ImageVulnerabilities   int `json:"imageVulnerabilities"`
-	NodeVulnerabilities    int `json:"nodeVulnerabilities"`
+	Alerts               int `json:"alerts"`
+	ImageVulnerabilities int `json:"imageVulnerabilities"`
+	NodeVulnerabilities  int `json:"nodeVulnerabilities"`
 }
 
 // +kubebuilder:object:root=true

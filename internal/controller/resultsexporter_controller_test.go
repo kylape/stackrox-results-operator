@@ -51,7 +51,24 @@ var _ = Describe("ResultsExporter Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: resultsv1alpha1.ResultsExporterSpec{
+						Central: resultsv1alpha1.CentralConfig{
+							Endpoint:       "https://central.stackrox.svc:443",
+							AuthSecretName: "central-auth",
+						},
+						Exports: resultsv1alpha1.ExportConfig{
+							Mode: "individual",
+							Alerts: &resultsv1alpha1.AlertExportConfig{
+								Enabled: true,
+							},
+							ImageVulnerabilities: &resultsv1alpha1.ImageVulnExportConfig{
+								Enabled: true,
+							},
+							NodeVulnerabilities: &resultsv1alpha1.NodeVulnExportConfig{
+								Enabled: true,
+							},
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

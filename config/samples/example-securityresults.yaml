@@ -1,0 +1,150 @@
+# Example SecurityResults CRD (Aggregated Mode)
+# This is what the operator creates when exporting in aggregated mode
+# One SecurityResults per namespace containing ALL alerts and image vulnerabilities
+# Created by the operator - users do not create these directly
+
+apiVersion: security.stackrox.io/v1alpha1
+kind: SecurityResults
+metadata:
+  name: production-results
+  namespace: production
+  labels:
+    stackrox.io/namespace: production
+  annotations:
+    stackrox.io/alert-count: "23"
+    stackrox.io/image-count: "12"
+spec:
+  # Namespace these results apply to
+  namespace: production
+
+  # All alerts in this namespace
+  alerts:
+    - id: "alert-abc123"
+      policyId: "policy-uuid-123"
+      policyName: "Ubuntu Package Manager Execution"
+      policySeverity: CRITICAL
+      policyCategories:
+        - "Anomalous Activity"
+      lifecycleStage: RUNTIME
+      entity:
+        type: Deployment
+        deployment:
+          name: "web-app"
+          namespace: "production"
+      violations:
+        - message: "Package manager 'apt-get' executed"
+          type: "PROCESS_EXECUTION"
+      time: "2025-11-04T10:30:00Z"
+      state: ACTIVE
+
+    - id: "alert-def456"
+      policyId: "policy-uuid-456"
+      policyName: "Curl Binary Detected"
+      policySeverity: HIGH
+      policyCategories:
+        - "System Modification"
+      lifecycleStage: DEPLOY
+      entity:
+        type: Deployment
+        deployment:
+          name: "api-server"
+          namespace: "production"
+      violations:
+        - message: "Curl binary found in image"
+          type: "IMAGE_SCAN"
+      time: "2025-11-04T09:15:00Z"
+      state: ACTIVE
+
+    - id: "alert-ghi789"
+      policyId: "policy-uuid-789"
+      policyName: "Privileged Container"
+      policySeverity: HIGH
+      lifecycleStage: DEPLOY
+      entity:
+        type: Deployment
+        deployment:
+          name: "monitoring"
+          namespace: "production"
+      time: "2025-11-04T08:00:00Z"
+      state: ACTIVE
+
+  # All image vulnerabilities for images in this namespace
+  imageVulnerabilities:
+    - image:
+        fullName: "docker.io/library/nginx:1.25.3"
+        name: "nginx"
+        tag: "1.25.3"
+        sha: "sha256:abc123def456"
+      scanTime: "2025-11-04T10:00:00Z"
+      summary:
+        total: 45
+        fixableTotal: 15
+        critical:
+          total: 3
+          fixable: 2
+        high:
+          total: 12
+          fixable: 8
+        medium:
+          total: 20
+          fixable: 5
+        low:
+          total: 10
+          fixable: 0
+      cves:
+        - cve: "CVE-2024-1234"
+          severity: CRITICAL
+          cvss: "9.8"
+          component:
+            name: "libssl"
+            version: "3.0.10-1"
+          fixable: true
+          fixedBy: "3.0.12-1"
+
+    - image:
+        fullName: "docker.io/library/redis:7.2"
+        name: "redis"
+        tag: "7.2"
+        sha: "sha256:def456ghi789"
+      scanTime: "2025-11-04T09:30:00Z"
+      summary:
+        total: 23
+        fixableTotal: 8
+        critical:
+          total: 0
+          fixable: 0
+        high:
+          total: 5
+          fixable: 3
+        medium:
+          total: 12
+          fixable: 5
+        low:
+          total: 6
+          fixable: 0
+      cves:
+        - cve: "CVE-2024-5555"
+          severity: HIGH
+          cvss: "8.1"
+          component:
+            name: "glibc"
+            version: "2.31-1"
+          fixable: true
+          fixedBy: "2.35-1"
+
+status:
+  # Aggregate summary statistics
+  summary:
+    # Alert counts by severity
+    criticalAlerts: 5
+    highAlerts: 12
+    totalAlerts: 23
+
+    # CVE counts across all images
+    criticalCVEs: 45
+    highCVEs: 89
+    totalCVEs: 234
+    fixableCVEs: 67
+
+  # Last update time
+  lastUpdated: "2025-11-04T11:00:00Z"

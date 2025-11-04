@@ -1,0 +1,63 @@
+# Example Alert CRD (Individual Mode)
+# This is what the operator creates when exporting alerts in individual mode
+# Created by the operator - users do not create these directly
+
+apiVersion: security.stackrox.io/v1alpha1
+kind: Alert
+metadata:
+  name: alert-ubuntu-pkg-manager-exec-abc123
+  namespace: production
+  labels:
+    stackrox.io/alert-id: "abc123-def456-789012"
+    stackrox.io/policy-name: ubuntu-package-manager-execution
+    stackrox.io/severity: CRITICAL
+    stackrox.io/lifecycle: RUNTIME
+    stackrox.io/state: ACTIVE
+  annotations:
+    stackrox.io/central-url: "https://central.stackrox.svc/main/violations/abc123-def456-789012"
+spec:
+  # Policy information
+  policyId: "policy-uuid-123"
+  policyName: "Ubuntu Package Manager Execution"
+  policySeverity: CRITICAL
+  policyCategories:
+    - "Anomalous Activity"
+    - "Privilege Escalation"
+
+  # Lifecycle stage
+  lifecycleStage: RUNTIME
+
+  # Violated entity (what triggered the alert)
+  entity:
+    type: Deployment
+    deployment:
+      id: "deployment-uuid-456"
+      name: "web-app"
+      namespace: "production"
+      clusterId: "cluster-uuid-789"
+      clusterName: "production-cluster"
+
+  # Policy violations
+  violations:
+    - message: "Package manager 'apt-get' was executed in container 'web-app'"
+      type: "PROCESS_EXECUTION"
+      keyValueAttrs:
+        - key: "process"
+          value: "/usr/bin/apt-get"
+        - key: "arguments"
+          value: "install curl"
+        - key: "uid"
+          value: "0"
+
+  # Timing
+  time: "2025-11-04T10:30:00Z"
+  firstOccurred: "2025-11-04T10:30:00Z"
+
+status:
+  # Current state of the alert
+  state: ACTIVE
+
+  # Enforcement actions taken (if any)
+  enforcementAction: "RUNTIME_ENFORCEMENT"
+  enforcementCount: 1
+  conditionMessage: "Process was killed by runtime enforcement"

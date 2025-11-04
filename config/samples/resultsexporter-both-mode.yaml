@@ -1,0 +1,70 @@
+# Example ResultsExporter using BOTH CRD modes
+# This creates both individual and aggregated CRDs simultaneously
+# Use this during dev preview to compare both approaches and provide feedback!
+
+apiVersion: results.stackrox.io/v1alpha1
+kind: ResultsExporter
+metadata:
+  name: stackrox-exporter-both
+  namespace: stackrox-operator
+  labels:
+    app.kubernetes.io/name: stackrox-results-operator
+    app.kubernetes.io/managed-by: kustomize
+    stackrox.io/mode: both
+spec:
+  # StackRox Central connection
+  central:
+    endpoint: https://central.stackrox.svc:443
+    authSecretName: central-auth
+    tlsConfig:
+      insecureSkipVerify: true
+
+  # Export configuration
+  exports:
+    # Mode: both creates BOTH individual and aggregated CRDs
+    # Perfect for testing and comparison during dev preview
+    mode: both
+
+    # Export configuration
+    alerts:
+      enabled: true
+      filters:
+        minSeverity: HIGH
+        excludeResolved: true
+      maxPerNamespace: 1000
+
+    imageVulnerabilities:
+      enabled: true
+      filters:
+        minSeverity: CRITICAL
+        fixableOnly: true
+        maxCVEsPerResource: 50
+      maxImages: 5000
+
+    nodeVulnerabilities:
+      enabled: true
+      filters:
+        minSeverity: HIGH
+        fixableOnly: false
+        maxCVEsPerResource: 50
+
+  # Sync interval
+  syncInterval: 5m
+
+  # Backfill duration
+  backfillDuration: 720h
+
+---
+# After deploying with mode: both, you can compare:
+#
+# Individual CRD commands:
+#   kubectl get alerts -n production
+#   kubectl get imagevulnerabilities
+#   kubectl get nodevulnerabilities
+#
+# Aggregated CRD commands:
+#   kubectl get securityresults -n production
+#   kubectl get clustersecurityresults
+#
+# Try both workflows and tell us which you prefer!
+# https://github.com/kylape/stackrox-results-operator/issues

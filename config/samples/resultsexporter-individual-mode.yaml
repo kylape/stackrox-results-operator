@@ -1,0 +1,77 @@
+# Example ResultsExporter using Individual CRD mode
+# This creates one CRD per alert/image/node for better UX
+# Recommended for clusters with < 1000 workloads
+
+apiVersion: results.stackrox.io/v1alpha1
+kind: ResultsExporter
+metadata:
+  name: stackrox-exporter-individual
+  namespace: stackrox-operator
+  labels:
+    app.kubernetes.io/name: stackrox-results-operator
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  # StackRox Central connection
+  central:
+    # Central API endpoint (required)
+    endpoint: https://central.stackrox.svc:443
+
+    # Secret containing auth credentials (required)
+    # See central-auth-secret.yaml for example
+    authSecretName: central-auth
+
+    # TLS configuration
+    tlsConfig:
+      # For production, set to false and provide CA bundle
+      insecureSkipVerify: true
+      # caBundleSecretName: central-ca-bundle
+
+  # Export configuration
+  exports:
+    # Mode: individual creates one CRD per finding
+    mode: individual
+
+    # Export alerts/violations
+    alerts:
+      enabled: true
+      filters:
+        # Only export HIGH and CRITICAL alerts
+        minSeverity: HIGH
+        # Optionally filter by lifecycle stage
+        # lifecycleStages:
+        #   - DEPLOY
+        #   - RUNTIME
+        # Skip resolved alerts
+        excludeResolved: true
+      # Limit per namespace to prevent runaway growth
+      maxPerNamespace: 1000
+
+    # Export image vulnerabilities
+    imageVulnerabilities:
+      enabled: true
+      filters:
+        # Only export CRITICAL vulnerabilities
+        minSeverity: CRITICAL
+        # Only include fixable CVEs
+        fixableOnly: true
+        # Limit CVEs per image to top 50
+        maxCVEsPerResource: 50
+      # Max total images to export
+      maxImages: 5000
+
+    # Export node vulnerabilities
+    nodeVulnerabilities:
+      enabled: true
+      filters:
+        # Export HIGH and CRITICAL node vulnerabilities
+        minSeverity: HIGH
+        # Include all CVEs (fixable and unfixable)
+        fixableOnly: false
+        # Limit CVEs per node to top 50
+        maxCVEsPerResource: 50
+
+  # Sync every 5 minutes
+  syncInterval: 5m
+
+  # On initial sync, backfill data from last 30 days
+  backfillDuration: 720h

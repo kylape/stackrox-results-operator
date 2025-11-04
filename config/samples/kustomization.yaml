@@ -1,5 +1,19 @@
-## Append samples of your project ##
+## ResultsExporter samples for different modes ##
 resources:
+# ResultsExporter configurations
+- resultsexporter-individual-mode.yaml    # Individual CRD mode (better UX)
+- resultsexporter-aggregated-mode.yaml    # Aggregated CRD mode (better scale)
+- resultsexporter-both-mode.yaml          # Both modes (for testing/comparison)
+
+# Auth secret example
+- central-auth-secret.yaml
+
+# Example exported CRDs (what the operator creates)
+- example-alert.yaml                      # Individual Alert example
+- example-imagevulnerability.yaml         # Individual ImageVulnerability example
+- example-securityresults.yaml            # Aggregated SecurityResults example
+
+# Legacy scaffolded samples (minimal examples)
 - results_v1alpha1_resultsexporter.yaml
 - security_v1alpha1_alert.yaml
 - security_v1alpha1_imagevulnerability.yaml

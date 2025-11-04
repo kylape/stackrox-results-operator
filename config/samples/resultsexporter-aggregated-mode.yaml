@@ -1,0 +1,57 @@
+# Example ResultsExporter using Aggregated CRD mode
+# This creates one SecurityResults CRD per namespace aggregating all findings
+# Recommended for clusters with > 1000 workloads for better scalability
+
+apiVersion: results.stackrox.io/v1alpha1
+kind: ResultsExporter
+metadata:
+  name: stackrox-exporter-aggregated
+  namespace: stackrox-operator
+  labels:
+    app.kubernetes.io/name: stackrox-results-operator
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  # StackRox Central connection
+  central:
+    endpoint: https://central.stackrox.svc:443
+    authSecretName: central-auth
+    tlsConfig:
+      insecureSkipVerify: true
+
+  # Export configuration
+  exports:
+    # Mode: aggregated creates one CRD per namespace with all findings
+    mode: aggregated
+
+    # Export all alerts
+    alerts:
+      enabled: true
+      filters:
+        # Include MEDIUM and above for comprehensive view
+        minSeverity: MEDIUM
+        excludeResolved: true
+      maxPerNamespace: 5000  # Higher limit since it's aggregated
+
+    # Export all image vulnerabilities
+    imageVulnerabilities:
+      enabled: true
+      filters:
+        # Include all HIGH and CRITICAL
+        minSeverity: HIGH
+        fixableOnly: false  # Include all for complete picture
+        maxCVEsPerResource: 50
+      maxImages: 10000  # Can handle more in aggregated mode
+
+    # Export node vulnerabilities
+    nodeVulnerabilities:
+      enabled: true
+      filters:
+        minSeverity: HIGH
+        fixableOnly: false
+        maxCVEsPerResource: 50
+
+  # Sync every 10 minutes (can be less frequent with aggregation)
+  syncInterval: 10m
+
+  # Backfill last 30 days
+  backfillDuration: 720h

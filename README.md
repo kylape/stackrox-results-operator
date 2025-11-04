@@ -1,121 +1,482 @@
-# stackrox-results-operator
-// TODO(user): Add simple overview of use/purpose
+# StackRox Results Operator
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+**Developer Preview - v1alpha1**
 
-## Getting Started
+A Kubernetes operator that exports StackRox/RHACS security data (alerts, vulnerabilities) as native Kubernetes Custom Resources (CRDs). This enables Kubernetes-native access to your security posture without requiring direct API calls to Central.
 
-### Prerequisites
-- go version v1.24.0+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+## Overview
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+The StackRox Results Operator provides a Kubernetes-native interface to your security data by:
 
-```sh
-make docker-build docker-push IMG=<some-registry>/stackrox-results-operator:tag
+* Syncing security findings from StackRox Central to Kubernetes CRDs
+* Supporting two CRD patterns: individual resources and aggregated resources
+* Enabling `kubectl` access to alerts and vulnerabilities
+* Facilitating GitOps workflows, monitoring, and policy enforcement
+
+**Important**: This is a developer preview project to explore different approaches to representing security data in Kubernetes. We're testing which pattern users prefer.
+
+## Architecture: Two CRD Patterns
+
+This operator supports **two different patterns** for representing security data. You can choose one, or run both simultaneously to compare.
+
+### Pattern 1: Individual CRDs (Better UX)
+
+Creates one CRD per security finding:
+
+* `Alert` - One per policy violation
+* `ImageVulnerability` - One per container image
+* `NodeVulnerability` - One per Kubernetes node
+
+**Pros:**
+* Intuitive Kubernetes-native UX
+* Simple `kubectl` commands: `kubectl get alerts`, `kubectl get imagevulnerabilities`
+* Each resource is independently addressable
+* Natural fit for GitOps workflows
+
+**Cons:**
+* Doesn't scale well on large clusters (could create thousands of CRDs)
+* Higher etcd pressure
+* More API server overhead
+
+**Example:**
+```bash
+$ kubectl get alerts -n production
+NAME                                    POLICY                          SEVERITY   STATE
+alert-ubuntu-pkg-manager-exec-abc123   Ubuntu Package Manager Execution CRITICAL   ACTIVE
+alert-curl-binary-detected-def456      Curl Binary Detected            HIGH       ACTIVE
+
+$ kubectl get imagevulnerabilities
+NAME                                    IMAGE                         CRITICAL   HIGH   TOTAL
+nginx-1-25-3-sha256-abc123             nginx:1.25.3                  3          12     45
+redis-7-2-sha256-def456                redis:7.2                     0          5      23
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+### Pattern 2: Aggregated CRDs (Better Scale)
 
-**Install the CRDs into the cluster:**
+Creates one CRD per namespace/cluster aggregating all findings:
 
-```sh
+* `SecurityResults` - One per namespace with ALL alerts and image vulnerabilities
+* `ClusterSecurityResults` - One per cluster with ALL node vulnerabilities
+
+**Pros:**
+* Scales to large clusters (50 CRDs instead of 5000)
+* Lower etcd and API server overhead
+* Better for high-level dashboards and summaries
+
+**Cons:**
+* Less intuitive UX
+* Requires `jq` or similar tools to extract specific findings
+* Not as natural for GitOps workflows
+
+**Example:**
+```bash
+$ kubectl get securityresults -n production
+NAME                 CRITICAL ALERTS   HIGH ALERTS   TOTAL ALERTS   CRITICAL CVES   TOTAL CVES
+production-results   5                 12            23             45              234
+
+# Extract specific alerts requires jq
+$ kubectl get securityresults production-results -o json | jq '.spec.alerts[] | select(.policySeverity=="CRITICAL")'
+```
+
+### Which Pattern Should I Use?
+
+**For small to medium clusters (< 1000 workloads):** Use `individual` mode for better UX
+
+**For large clusters (> 1000 workloads):** Use `aggregated` mode for better scale
+
+**For dev preview testing:** Use `both` mode and tell us which you prefer!
+
+## Quick Start
+
+### Prerequisites
+
+* Kubernetes cluster v1.11.3+
+* StackRox Central deployed and accessible
+* kubectl v1.11.3+
+* go version v1.24.0+ (for development)
+
+### Installation
+
+1. Install the CRDs:
+
+```bash
+kubectl apply -f config/crd/bases/
+```
+
+2. Deploy the operator:
+
+```bash
+kubectl apply -f config/manager/manager.yaml
+```
+
+3. Create a secret with Central credentials:
+
+```bash
+# Using API token
+kubectl create secret generic central-auth \
+  --from-literal=token='your-api-token'
+
+# OR using htpasswd
+kubectl create secret generic central-auth \
+  --from-literal=username='admin' \
+  --from-literal=password='your-password'
+```
+
+4. Create a `ResultsExporter` resource:
+
+```yaml
+apiVersion: results.stackrox.io/v1alpha1
+kind: ResultsExporter
+metadata:
+  name: stackrox-exporter
+  namespace: stackrox-operator
+spec:
+  central:
+    endpoint: https://central.stackrox.svc:443
+    authSecretName: central-auth
+    tlsConfig:
+      insecureSkipVerify: false  # Set to true for self-signed certs in dev
+
+  exports:
+    # Choose: individual, aggregated, or both
+    mode: individual
+
+    alerts:
+      enabled: true
+      filters:
+        minSeverity: HIGH
+        excludeResolved: true
+      maxPerNamespace: 1000
+
+    imageVulnerabilities:
+      enabled: true
+      filters:
+        minSeverity: CRITICAL
+        fixableOnly: true
+        maxCVEsPerResource: 50
+      maxImages: 5000
+
+    nodeVulnerabilities:
+      enabled: true
+      filters:
+        minSeverity: HIGH
+        fixableOnly: false
+        maxCVEsPerResource: 50
+
+  syncInterval: 5m
+  backfillDuration: 720h  # 30 days
+```
+
+5. Verify deployment:
+
+```bash
+# Check operator status
+kubectl get resultsexporter stackrox-exporter -o yaml
+
+# Check exported resources (individual mode)
+kubectl get alerts --all-namespaces
+kubectl get imagevulnerabilities
+kubectl get nodevulnerabilities
+
+# Check exported resources (aggregated mode)
+kubectl get securityresults --all-namespaces
+kubectl get clustersecurityresults
+```
+
+## Configuration Reference
+
+### ResultsExporter Spec
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `central` | `CentralConfig` | Connection to StackRox Central |
+| `exports` | `ExportConfig` | What data to export |
+| `syncInterval` | `Duration` | How often to sync (default: 5m) |
+| `backfillDuration` | `Duration` | How far back to backfill initially (default: 720h) |
+
+### Export Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `individual` | One CRD per alert/image/node | Small clusters, better UX |
+| `aggregated` | One CRD per namespace/cluster | Large clusters, better scale |
+| `both` | Create both patterns | Testing/comparison |
+
+### Alert Filters
+
+```yaml
+alerts:
+  enabled: true
+  filters:
+    minSeverity: HIGH              # LOW, MEDIUM, HIGH, CRITICAL
+    lifecycleStages:               # Optional: filter by stage
+      - DEPLOY
+      - RUNTIME
+    excludeResolved: true          # Skip resolved alerts
+  maxPerNamespace: 1000            # Prevent runaway growth
+```
+
+### Vulnerability Filters
+
+```yaml
+imageVulnerabilities:
+  enabled: true
+  filters:
+    minSeverity: CRITICAL          # LOW, MEDIUM, HIGH, CRITICAL
+    fixableOnly: true              # Only include fixable CVEs
+    maxCVEsPerResource: 50         # Limit CVEs per image
+  maxImages: 5000                  # Max images to export
+```
+
+## kubectl Command Examples
+
+### Individual Mode Commands
+
+```bash
+# List all alerts
+kubectl get alerts --all-namespaces
+
+# Get alerts in specific namespace
+kubectl get alerts -n production
+
+# Show alert details
+kubectl describe alert alert-name -n production
+
+# Filter by labels (alerts include severity labels)
+kubectl get alerts -l severity=CRITICAL
+
+# Watch for new alerts
+kubectl get alerts -n production -w
+
+# List image vulnerabilities
+kubectl get imagevulnerabilities
+
+# Show vulnerabilities for specific image
+kubectl get imagevulnerability nginx-1-25-3-sha256-abc123 -o yaml
+
+# List node vulnerabilities
+kubectl get nodevulnerabilities
+
+# Show critical node vulnerabilities
+kubectl get nodevulnerabilities -l severity=CRITICAL
+```
+
+### Aggregated Mode Commands
+
+```bash
+# Get security summary for namespace
+kubectl get securityresults -n production
+
+# View all findings in namespace
+kubectl get securityresults production-results -o yaml
+
+# Extract critical alerts using jq
+kubectl get securityresults production-results -n production -o json \
+  | jq '.spec.alerts[] | select(.policySeverity=="CRITICAL")'
+
+# Get cluster-wide node vulnerability summary
+kubectl get clustersecurityresults
+
+# View all node vulnerabilities
+kubectl get clustersecurityresults cluster-results -o yaml
+
+# Count total CVEs across cluster
+kubectl get clustersecurityresults cluster-results -o json \
+  | jq '.status.summary.totalCVEs'
+```
+
+## Use Cases
+
+### 1. GitOps Workflows
+
+Export security findings to Git for audit trails and policy enforcement:
+
+```bash
+# Export current state
+kubectl get alerts -n production -o yaml > production-alerts.yaml
+kubectl get imagevulnerabilities -o yaml > image-vulns.yaml
+
+# Commit to Git for tracking
+git add production-alerts.yaml image-vulns.yaml
+git commit -m "Security snapshot $(date)"
+```
+
+### 2. Monitoring and Alerting
+
+Use Kubernetes monitoring tools to alert on security findings:
+
+```yaml
+# Prometheus-style alert
+- alert: CriticalSecurityAlert
+  expr: count(kube_customresource_alert{severity="CRITICAL"}) > 0
+  annotations:
+    summary: "Critical security alerts detected"
+```
+
+### 3. Policy Enforcement
+
+Use admission controllers or policy engines:
+
+```yaml
+# Example: Kyverno policy blocking deployments with critical vulnerabilities
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: block-critical-vulns
+spec:
+  validationFailureAction: enforce
+  rules:
+    - name: check-image-vulns
+      match:
+        resources:
+          kinds:
+            - Deployment
+      validate:
+        message: "Image has critical vulnerabilities"
+        deny:
+          conditions:
+            - key: "{{ request.object.spec.template.spec.containers[].image }}"
+              operator: In
+              value: "{{ query.imagevulnerabilities.*.spec.image.fullName[?status.summary.critical.total > `0`] }}"
+```
+
+### 4. Dashboard Integration
+
+Build custom dashboards querying CRDs:
+
+```bash
+# Get metrics for dashboard
+kubectl get securityresults -A -o json \
+  | jq '[.items[] | {
+      namespace: .metadata.namespace,
+      criticalAlerts: .status.summary.criticalAlerts,
+      criticalCVEs: .status.summary.criticalCVEs
+    }]'
+```
+
+## API Reference
+
+### Individual CRDs (security.stackrox.io/v1alpha1)
+
+* **Alert** (namespaced): Policy violations and security alerts
+* **ImageVulnerability** (cluster-scoped): Container image vulnerabilities
+* **NodeVulnerability** (cluster-scoped): Kubernetes node vulnerabilities
+
+### Aggregated CRDs (security.stackrox.io/v1alpha1)
+
+* **SecurityResults** (namespaced): All security findings for a namespace
+* **ClusterSecurityResults** (cluster-scoped): All node vulnerabilities cluster-wide
+
+### Configuration CRD (results.stackrox.io/v1alpha1)
+
+* **ResultsExporter** (namespaced): Operator configuration
+
+See `/api` directory for complete type definitions.
+
+## Development
+
+### Building from Source
+
+```bash
+# Build the operator binary
+make build
+
+# Run locally (outside cluster)
+make run
+
+# Run tests
+make test
+
+# Generate/update CRDs
+make manifests
+
+# Install CRDs into cluster
 make install
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+### Building Container Image
 
-```sh
-make deploy IMG=<some-registry>/stackrox-results-operator:tag
+```bash
+# Build and push image
+make docker-build docker-push IMG=<your-registry>/stackrox-results-operator:tag
+
+# Deploy to cluster
+make deploy IMG=<your-registry>/stackrox-results-operator:tag
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+### Testing Both Modes
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+To compare both patterns:
 
-```sh
-kubectl apply -k config/samples/
-```
+1. Set `exports.mode: both` in your ResultsExporter
+2. Observe both individual and aggregated CRDs being created
+3. Try common operations with both patterns
+4. Compare UX, performance, and suitability for your use cases
+5. **Give us feedback!** (see below)
 
->**NOTE**: Ensure that the samples has default values to test it out.
+## Pattern Comparison Table
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+| Aspect | Individual CRDs | Aggregated CRDs |
+|--------|----------------|-----------------|
+| **kubectl UX** | ⭐⭐⭐⭐⭐ Excellent | ⭐⭐ Requires jq |
+| **Scalability** | ⭐⭐ Poor (5000+ CRDs) | ⭐⭐⭐⭐⭐ Excellent (50 CRDs) |
+| **GitOps fit** | ⭐⭐⭐⭐⭐ Natural | ⭐⭐⭐ Workable |
+| **Discoverability** | ⭐⭐⭐⭐⭐ Each finding addressable | ⭐⭐ Must query arrays |
+| **API server load** | ⭐⭐ High | ⭐⭐⭐⭐⭐ Low |
+| **etcd pressure** | ⭐⭐ High | ⭐⭐⭐⭐⭐ Low |
+| **Real-time updates** | ⭐⭐⭐⭐ Per-finding | ⭐⭐⭐⭐⭐ Batch updates |
+| **Monitoring integration** | ⭐⭐⭐⭐⭐ Easy | ⭐⭐⭐ More complex |
 
-```sh
-kubectl delete -k config/samples/
-```
+## Roadmap
 
-**Delete the APIs(CRDs) from the cluster:**
+### v1alpha1 (Current - Developer Preview)
+- [x] Basic CRD definitions
+- [x] Individual CRD pattern
+- [x] Aggregated CRD pattern
+- [x] Mode selection
+- [ ] Central API client
+- [ ] Sync controllers
+- [ ] Basic filtering
 
-```sh
-make uninstall
-```
+### v1alpha2 (Planned)
+- [ ] Webhook validation
+- [ ] Status conditions
+- [ ] Metrics/observability
+- [ ] Advanced filtering
+- [ ] Label selectors
+- [ ] User feedback integration
 
-**UnDeploy the controller from the cluster:**
+### v1beta1 (Future)
+- [ ] Production-ready based on user feedback
+- [ ] Choose single pattern or support both
+- [ ] Performance optimizations
+- [ ] HA support
+- [ ] Advanced use cases
 
-```sh
-make undeploy
-```
+## We Need Your Feedback!
 
-## Project Distribution
+This is a **developer preview** to explore different approaches. We need your input:
 
-Following the options to release and provide this solution to the users.
+### Please Tell Us
 
-### By providing a bundle with all YAML files
+1. **Which pattern do you prefer?** Individual or Aggregated?
+2. **What's your cluster size?** How many workloads/images/nodes?
+3. **What's your use case?** Monitoring? GitOps? Policy enforcement?
+4. **Which commands do you run most?** What's your workflow?
+5. **What's missing?** What features would make this more useful?
 
-1. Build the installer for the image built and published in the registry:
+### How to Provide Feedback
 
-```sh
-make build-installer IMG=<some-registry>/stackrox-results-operator:tag
-```
+* **GitHub Issues**: https://github.com/kylape/stackrox-results-operator/issues
+* **Preferred Pattern**: Tell us which mode you're using and why
+* **UX Feedback**: Share your kubectl workflows and pain points
+* **Scale Data**: Share cluster size and performance observations
 
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/stackrox-results-operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v1-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+Your feedback will directly shape whether we:
+* Focus on individual CRDs for better UX
+* Focus on aggregated CRDs for better scale
+* Support both patterns long-term
+* Explore hybrid approaches
 
 ## License
 
@@ -132,4 +493,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
