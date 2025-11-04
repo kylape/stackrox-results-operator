@@ -73,6 +73,15 @@ type TLSConfig struct {
 
 // ExportConfig defines what to export
 type ExportConfig struct {
+	// Export mode: individual CRDs vs aggregated CRDs
+	// - "individual": Create one CRD per alert/image/node (better UX: kubectl get alerts)
+	// - "aggregated": Create one CRD per namespace (better scale: 50 CRDs vs 5000)
+	// - "both": Create both patterns (for comparison during dev preview)
+	// +kubebuilder:validation:Enum=individual;aggregated;both
+	// +kubebuilder:default:="individual"
+	// +optional
+	Mode string `json:"mode,omitempty"`
+
 	// Export alerts
 	// +optional
 	Alerts *AlertExportConfig `json:"alerts,omitempty"`

@@ -161,6 +161,18 @@ spec:
                     required:
                     - enabled
                     type: object
+                  mode:
+                    default: individual
+                    description: |-
+                      Export mode: individual CRDs vs aggregated CRDs
+                      - "individual": Create one CRD per alert/image/node (better UX: kubectl get alerts)
+                      - "aggregated": Create one CRD per namespace (better scale: 50 CRDs vs 5000)
+                      - "both": Create both patterns (for comparison during dev preview)
+                    enum:
+                    - individual
+                    - aggregated
+                    - both
+                    type: string
                   nodeVulnerabilities:
                     description: Export node vulnerabilities
                     properties:
