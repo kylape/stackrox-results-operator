@@ -1,0 +1,9 @@
+apiVersion: results.stackrox.io/v1alpha1
+kind: ResultsExporter
+metadata:
+  labels:
+    app.kubernetes.io/name: stackrox-results-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: resultsexporter-sample
+spec:
+  # TODO(user): Add fields here

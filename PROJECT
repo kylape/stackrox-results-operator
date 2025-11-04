@@ -8,4 +8,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: stackrox-results-operator
 repo: github.com/kylape/stackrox-results-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: stackrox.io
+  group: results
+  kind: ResultsExporter
+  path: github.com/kylape/stackrox-results-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"
