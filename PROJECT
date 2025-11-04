@@ -6,6 +6,7 @@ cliVersion: 4.9.0
 domain: stackrox.io
 layout:
 - go.kubebuilder.io/v4
+multigroup: true
 projectName: stackrox-results-operator
 repo: github.com/kylape/stackrox-results-operator
 resources:
