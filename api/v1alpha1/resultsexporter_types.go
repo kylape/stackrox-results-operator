@@ -25,41 +25,203 @@ import (
 
 // ResultsExporterSpec defines the desired state of ResultsExporter
 type ResultsExporterSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// Central connection configuration
+	// +kubebuilder:validation:Required
+	Central CentralConfig `json:"central"`
 
-	// foo is an example field of ResultsExporter. Edit resultsexporter_types.go to remove/update
+	// What to export
+	// +kubebuilder:validation:Required
+	Exports ExportConfig `json:"exports"`
+
+	// How often to sync (default: 5m)
+	// +kubebuilder:default:="5m"
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	SyncInterval *metav1.Duration `json:"syncInterval,omitempty"`
+
+	// How far back to backfill on initial sync (default: 720h = 30 days)
+	// +kubebuilder:default:="720h"
+	// +optional
+	BackfillDuration *metav1.Duration `json:"backfillDuration,omitempty"`
+}
+
+// CentralConfig defines the connection to StackRox Central
+type CentralConfig struct {
+	// Central API endpoint
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern:=`^https?://.*`
+	Endpoint string `json:"endpoint"`
+
+	// Secret containing auth credentials (htpasswd or API token)
+	// +kubebuilder:validation:Required
+	AuthSecretName string `json:"authSecretName"`
+
+	// TLS configuration
+	// +optional
+	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
+}
+
+// TLSConfig defines TLS settings
+type TLSConfig struct {
+	// Skip TLS verification (not recommended for production)
+	// +optional
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+
+	// Secret containing CA bundle
+	// +optional
+	CABundleSecretName string `json:"caBundleSecretName,omitempty"`
+}
+
+// ExportConfig defines what to export
+type ExportConfig struct {
+	// Export alerts
+	// +optional
+	Alerts *AlertExportConfig `json:"alerts,omitempty"`
+
+	// Export image vulnerabilities
+	// +optional
+	ImageVulnerabilities *ImageVulnExportConfig `json:"imageVulnerabilities,omitempty"`
+
+	// Export node vulnerabilities
+	// +optional
+	NodeVulnerabilities *NodeVulnExportConfig `json:"nodeVulnerabilities,omitempty"`
+}
+
+// AlertExportConfig defines alert export settings
+type AlertExportConfig struct {
+	// Enable alert export
+	// +kubebuilder:default:=true
+	Enabled bool `json:"enabled"`
+
+	// Filters
+	// +optional
+	Filters *AlertFilters `json:"filters,omitempty"`
+
+	// Max alerts per namespace (default: 1000)
+	// +kubebuilder:default:=1000
+	// +optional
+	MaxPerNamespace int `json:"maxPerNamespace,omitempty"`
+}
+
+// AlertFilters defines filtering for alerts
+type AlertFilters struct {
+	// Minimum severity (LOW, MEDIUM, HIGH, CRITICAL)
+	// +kubebuilder:validation:Enum:=LOW;MEDIUM;HIGH;CRITICAL
+	// +optional
+	MinSeverity string `json:"minSeverity,omitempty"`
+
+	// Lifecycle stages to include
+	// +optional
+	LifecycleStages []string `json:"lifecycleStages,omitempty"`
+
+	// Exclude resolved alerts
+	// +optional
+	ExcludeResolved bool `json:"excludeResolved,omitempty"`
+}
+
+// ImageVulnExportConfig defines image vulnerability export settings
+type ImageVulnExportConfig struct {
+	// Enable image vulnerability export
+	// +kubebuilder:default:=true
+	Enabled bool `json:"enabled"`
+
+	// Filters
+	// +optional
+	Filters *VulnFilters `json:"filters,omitempty"`
+
+	// Max images to export (default: 5000)
+	// +kubebuilder:default:=5000
+	// +optional
+	MaxImages int `json:"maxImages,omitempty"`
+}
+
+// NodeVulnExportConfig defines node vulnerability export settings
+type NodeVulnExportConfig struct {
+	// Enable node vulnerability export
+	// +kubebuilder:default:=true
+	Enabled bool `json:"enabled"`
+
+	// Filters
+	// +optional
+	Filters *VulnFilters `json:"filters,omitempty"`
+}
+
+// VulnFilters defines filtering for vulnerabilities
+type VulnFilters struct {
+	// Minimum severity (LOW, MEDIUM, HIGH, CRITICAL)
+	// +kubebuilder:validation:Enum:=LOW;MEDIUM;HIGH;CRITICAL
+	// +optional
+	MinSeverity string `json:"minSeverity,omitempty"`
+
+	// Only include fixable vulnerabilities
+	// +optional
+	FixableOnly bool `json:"fixableOnly,omitempty"`
+
+	// Max CVEs per image/node (default: 50)
+	// +kubebuilder:default:=50
+	// +optional
+	MaxCVEsPerResource int `json:"maxCVEsPerResource,omitempty"`
 }
 
 // ResultsExporterStatus defines the observed state of ResultsExporter.
 type ResultsExporterStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the ResultsExporter resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
+	// Conditions represent the current state of the ResultsExporter
 	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
+	// Standard condition types:
+	// - "Ready": the exporter is functioning correctly
+	// - "CentralConnected": connection to Central is established
+	// - "Syncing": sync operation is in progress
 	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Last sync time
+	// +optional
+	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
+
+	// Last successful sync
+	// +optional
+	LastSuccessfulSync *metav1.Time `json:"lastSuccessfulSync,omitempty"`
+
+	// Sync duration
+	// +optional
+	SyncDuration *metav1.Duration `json:"syncDuration,omitempty"`
+
+	// Exported resource counts
+	// +optional
+	ExportedResources *ExportedResourceCounts `json:"exportedResources,omitempty"`
+
+	// Last sync error (if any)
+	// +optional
+	LastSyncError string `json:"lastSyncError,omitempty"`
+
+	// Consecutive failures
+	// +optional
+	ConsecutiveFailures int `json:"consecutiveFailures,omitempty"`
+
+	// Observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// ExportedResourceCounts tracks how many resources have been exported
+type ExportedResourceCounts struct {
+	Alerts                 int `json:"alerts"`
+	ImageVulnerabilities   int `json:"imageVulnerabilities"`
+	NodeVulnerabilities    int `json:"nodeVulnerabilities"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:path=resultsexporters,scope=Namespaced
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Central",type=string,JSONPath=`.status.conditions[?(@.type=="CentralConnected")].status`
+// +kubebuilder:printcolumn:name="Alerts",type=integer,JSONPath=`.status.exportedResources.alerts`
+// +kubebuilder:printcolumn:name="Images",type=integer,JSONPath=`.status.exportedResources.imageVulnerabilities`
+// +kubebuilder:printcolumn:name="Nodes",type=integer,JSONPath=`.status.exportedResources.nodeVulnerabilities`
+// +kubebuilder:printcolumn:name="Last Sync",type=date,JSONPath=`.status.lastSyncTime`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ResultsExporter is the Schema for the resultsexporters API
 type ResultsExporter struct {
