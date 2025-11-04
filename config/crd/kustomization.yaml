@@ -6,6 +6,8 @@ resources:
 - bases/security.stackrox.io_alerts.yaml
 - bases/security.stackrox.io_imagevulnerabilities.yaml
 - bases/security.stackrox.io_nodevulnerabilities.yaml
+- bases/security.stackrox.io_securityresults.yaml
+- bases/security.stackrox.io_clustersecurityresults.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

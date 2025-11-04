@@ -22,6 +22,12 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the stackrox-results-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- security_clustersecurityresults_admin_role.yaml
+- security_clustersecurityresults_editor_role.yaml
+- security_clustersecurityresults_viewer_role.yaml
+- security_securityresults_admin_role.yaml
+- security_securityresults_editor_role.yaml
+- security_securityresults_viewer_role.yaml
 - security_nodevulnerability_admin_role.yaml
 - security_nodevulnerability_editor_role.yaml
 - security_nodevulnerability_viewer_role.yaml

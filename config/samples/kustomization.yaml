@@ -4,4 +4,6 @@ resources:
 - security_v1alpha1_alert.yaml
 - security_v1alpha1_imagevulnerability.yaml
 - security_v1alpha1_nodevulnerability.yaml
+- security_v1alpha1_securityresults.yaml
+- security_v1alpha1_clustersecurityresults.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
