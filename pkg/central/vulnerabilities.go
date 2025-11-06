@@ -80,7 +80,7 @@ type CVE struct {
 	Summary           string     `json:"summary,omitempty"`
 	Link              string     `json:"link,omitempty"`
 	Severity          string     `json:"severity"`
-	CVSS              string     `json:"cvss,omitempty"`
+	CVSS              float64    `json:"cvss,omitempty"`
 	CVSSv3            *CVSSv3    `json:"cvssV3,omitempty"`
 	Component         *Component `json:"component,omitempty"`
 	Fixable           bool       `json:"fixable,omitempty"`
