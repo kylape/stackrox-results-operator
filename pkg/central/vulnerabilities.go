@@ -1,6 +1,7 @@
 package central
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,7 +14,31 @@ import (
 	securityv1alpha1 "github.com/kylape/stackrox-results-operator/api/security/v1alpha1"
 )
 
-// ImageScan represents an image scan result from Central
+// ExportImageResponse represents the response from /v1/export/images
+type ExportImageResponse struct {
+	Result *ExportImageResult `json:"result"`
+}
+
+type ExportImageResult struct {
+	Image *StorageImage `json:"image"`
+}
+
+// StorageImage represents the full image object from the export API
+type StorageImage struct {
+	ID       string         `json:"id"`
+	Name     *ImageName     `json:"name"`
+	Metadata *ImageMetadata `json:"metadata,omitempty"`
+	Scan     *ImageScanData `json:"scan,omitempty"`
+}
+
+// ImageScanData represents scan results from the export API
+type ImageScanData struct {
+	ScannerVersion string       `json:"scannerVersion,omitempty"`
+	ScanTime       string       `json:"scanTime"`
+	Components     []*Component `json:"components,omitempty"`
+}
+
+// ImageScan represents an image scan result (legacy structure for compatibility)
 type ImageScan struct {
 	Image      *Image       `json:"image"`
 	ScanTime   string       `json:"scanTime"`
@@ -47,6 +72,7 @@ type Component struct {
 	Name     string `json:"name"`
 	Version  string `json:"version"`
 	Location string `json:"location,omitempty"`
+	Vulns    []*CVE `json:"vulns,omitempty"`
 }
 
 type CVE struct {
@@ -141,50 +167,162 @@ func (c *Client) ListImageVulnerabilities(ctx context.Context, opts ListImageVul
 		query.Set("query", strings.Join(filters, "+"))
 	}
 
-	if opts.MaxImages > 0 {
-		query.Set("pagination.limit", fmt.Sprintf("%d", opts.MaxImages))
-	}
+	// Note: Export API doesn't support pagination.limit like list API
+	// We'll handle limiting on the client side
 
-	path := "/v1/images"
+	path := "/v1/export/images"
 	if len(query) > 0 {
 		path += "?" + query.Encode()
 	}
 
 	resp, err := c.doRequest(ctx, "GET", path)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list images")
+		return nil, errors.Wrap(err, "failed to export images")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, errors.Errorf("list images failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, errors.Errorf("export images failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read response body")
+	// Parse newline-delimited JSON stream
+	var imageScans []*ImageScan
+	scanner := bufio.NewScanner(resp.Body)
+
+	// Increase buffer size for large scan results
+	const maxScanTokenSize = 10 * 1024 * 1024 // 10MB
+	buf := make([]byte, maxScanTokenSize)
+	scanner.Buffer(buf, maxScanTokenSize)
+
+	imageCount := 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var exportResp ExportImageResponse
+		if err := json.Unmarshal(line, &exportResp); err != nil {
+			log.Error(err, "Failed to parse export image response", "line", string(line))
+			continue
+		}
+
+		if exportResp.Result == nil || exportResp.Result.Image == nil {
+			continue
+		}
+
+		img := exportResp.Result.Image
+
+		// Skip images without scan data
+		if img.Scan == nil || len(img.Scan.Components) == 0 {
+			continue
+		}
+
+		// Convert to ImageScan format
+		imageScan := convertStorageImageToImageScan(img)
+
+		// Apply filters
+		if opts.MaxCVEsPerImage > 0 && len(imageScan.CVEs) > opts.MaxCVEsPerImage {
+			imageScan.CVEs = imageScan.CVEs[:opts.MaxCVEsPerImage]
+		}
+
+		imageScans = append(imageScans, imageScan)
+		imageCount++
+
+		// Limit number of images if requested
+		if opts.MaxImages > 0 && imageCount >= opts.MaxImages {
+			break
+		}
 	}
 
-	var response struct {
-		Images []*ImageScan `json:"images"`
+	if err := scanner.Err(); err != nil {
+		return nil, errors.Wrap(err, "failed to read export stream")
 	}
 
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, errors.Wrap(err, "failed to parse images response")
+	log.Info("Retrieved image vulnerabilities from Central", "count", len(imageScans))
+	return imageScans, nil
+}
+
+// convertStorageImageToImageScan converts the export API format to ImageScan format
+func convertStorageImageToImageScan(img *StorageImage) *ImageScan {
+	scan := &ImageScan{
+		Image: &Image{
+			ID:       img.ID,
+			Name:     img.Name,
+			Metadata: img.Metadata,
+		},
 	}
 
-	// Limit CVEs per image if requested
-	if opts.MaxCVEsPerImage > 0 {
-		for _, img := range response.Images {
-			if len(img.CVEs) > opts.MaxCVEsPerImage {
-				img.CVEs = img.CVEs[:opts.MaxCVEsPerImage]
+	if img.Scan != nil {
+		scan.ScanTime = img.Scan.ScanTime
+		scan.Components = img.Scan.Components
+
+		// Extract CVEs from components
+		var allCVEs []*CVE
+		for _, comp := range img.Scan.Components {
+			for _, vuln := range comp.Vulns {
+				// Set component reference on the CVE
+				if vuln.Component == nil {
+					vuln.Component = &Component{
+						Name:     comp.Name,
+						Version:  comp.Version,
+						Location: comp.Location,
+					}
+				}
+				allCVEs = append(allCVEs, vuln)
+			}
+		}
+		scan.CVEs = allCVEs
+
+		// Calculate summary
+		scan.Summary = calculateVulnSummary(allCVEs)
+	}
+
+	return scan
+}
+
+// calculateVulnSummary generates a vulnerability summary from CVEs
+func calculateVulnSummary(cves []*CVE) *VulnSummary {
+	summary := &VulnSummary{
+		CriticalSeverity: &SeverityCount{},
+		HighSeverity:     &SeverityCount{},
+		MediumSeverity:   &SeverityCount{},
+		LowSeverity:      &SeverityCount{},
+	}
+
+	for _, cve := range cves {
+		summary.TotalCVEs++
+		if cve.Fixable {
+			summary.FixableCVEs++
+		}
+
+		severity := strings.ToUpper(cve.Severity)
+		switch severity {
+		case "CRITICAL", "CRITICAL_VULNERABILITY_SEVERITY":
+			summary.CriticalSeverity.Total++
+			if cve.Fixable {
+				summary.CriticalSeverity.Fixable++
+			}
+		case "HIGH", "IMPORTANT", "IMPORTANT_VULNERABILITY_SEVERITY":
+			summary.HighSeverity.Total++
+			if cve.Fixable {
+				summary.HighSeverity.Fixable++
+			}
+		case "MEDIUM", "MODERATE", "MODERATE_VULNERABILITY_SEVERITY":
+			summary.MediumSeverity.Total++
+			if cve.Fixable {
+				summary.MediumSeverity.Fixable++
+			}
+		case "LOW", "LOW_VULNERABILITY_SEVERITY":
+			summary.LowSeverity.Total++
+			if cve.Fixable {
+				summary.LowSeverity.Fixable++
 			}
 		}
 	}
 
-	log.Info("Retrieved image vulnerabilities from Central", "count", len(response.Images))
-	return response.Images, nil
+	return summary
 }
 
 // ListNodeVulnerabilities fetches node vulnerability data from Central
