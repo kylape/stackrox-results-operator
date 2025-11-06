@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Override namespace for local development
+namespace: stackrox
+
+# Override namePrefix
+namePrefix: results-operator-
+
+# Use default configuration as base
+resources:
+- ../default
+
+# Override image for local registry
+images:
+- name: controller
+  newName: kind-registry:5000/stackrox-results-operator
+  newTag: v2
+
+# Apply local patches
+patches:
+- path: image_pull_policy_patch.yaml
+  target:
+    kind: Deployment
