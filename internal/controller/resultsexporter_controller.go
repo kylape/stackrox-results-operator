@@ -45,8 +45,13 @@ type ResultsExporterReconciler struct {
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=resultsexporters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=resultsexporters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=alerts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=security.stackrox.io,resources=alerts/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=security.stackrox.io,resources=clusteralerts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=security.stackrox.io,resources=clusteralerts/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=imagevulnerabilities,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=security.stackrox.io,resources=imagevulnerabilities/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=nodevulnerabilities,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=security.stackrox.io,resources=nodevulnerabilities/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=securityresults,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=clustersecurityresults,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch

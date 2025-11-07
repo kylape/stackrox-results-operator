@@ -43,6 +43,7 @@ rules:
   - security.stackrox.io
   resources:
   - alerts
+  - clusteralerts
   - clustersecurityresults
   - imagevulnerabilities
   - nodevulnerabilities
@@ -55,3 +56,14 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - security.stackrox.io
+  resources:
+  - alerts/status
+  - clusteralerts/status
+  - imagevulnerabilities/status
+  - nodevulnerabilities/status
+  verbs:
+  - get
+  - patch
+  - update
