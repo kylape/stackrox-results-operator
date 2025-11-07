@@ -299,12 +299,18 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 	createdCount := 0
 	for _, alert := range alerts {
 		// Determine if this is a namespace-scoped or cluster-scoped alert
-		hasNamespace := alert.Entity != nil && alert.Entity.Deployment != nil && alert.Entity.Deployment.Namespace != ""
+		// Check both formats: list endpoint has Deployment at top level, detail endpoint has it in Entity
+		var namespace string
+		if alert.Deployment != nil && alert.Deployment.Namespace != "" {
+			namespace = alert.Deployment.Namespace
+		} else if alert.Entity != nil && alert.Entity.Deployment != nil && alert.Entity.Deployment.Namespace != "" {
+			namespace = alert.Entity.Deployment.Namespace
+		}
 
-		if hasNamespace {
+		if namespace != "" {
 			// Create/update namespace-scoped Alert
 			crd := alert.ConvertToCRD()
-			crd.Namespace = alert.Entity.Deployment.Namespace
+			crd.Namespace = namespace
 
 			// Create or update
 			existing := &securityv1alpha1.Alert{}

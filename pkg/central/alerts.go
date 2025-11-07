@@ -17,12 +17,24 @@ import (
 
 // Alert represents an alert from Central API
 // This is the API response format, which we'll convert to our CRD format
+// Note: The list endpoint (/v1/alerts) returns deployment/namespace at the top level,
+// while the detail endpoint (/v1/alerts/{id}) returns them in an "entity" field.
+// We support both formats.
 type Alert struct {
 	ID                string       `json:"id"`
 	Policy            *Policy      `json:"policy"`
 	LifecycleStage    string       `json:"lifecycleStage"`
+
+	// Fields from list endpoint (/v1/alerts)
+	Deployment       *DeploymentInfo    `json:"deployment,omitempty"`
+	Namespace        string             `json:"namespace,omitempty"`
+	CommonEntityInfo *CommonEntityInfo  `json:"commonEntityInfo,omitempty"`
+
+	// Fields from detail endpoint (/v1/alerts/{id})
 	Entity            *AlertEntity `json:"entity,omitempty"`
 	Violations        []*Violation `json:"violations,omitempty"`
+
+	// Common fields
 	Time              string       `json:"time"`
 	FirstOccurred     string       `json:"firstOccurred,omitempty"`
 	State             string       `json:"state,omitempty"`
@@ -62,6 +74,11 @@ type ImageInfo struct {
 type ResourceInfo struct {
 	Type string `json:"type,omitempty"`
 	Name string `json:"name,omitempty"`
+}
+
+type CommonEntityInfo struct {
+	Namespace    string `json:"namespace,omitempty"`
+	ResourceType string `json:"resourceType,omitempty"`
 }
 
 type Violation struct {
@@ -222,7 +239,23 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 	}
 
 	// Entity information
-	if a.Entity != nil {
+	// The list endpoint (/v1/alerts) returns deployment at the top level,
+	// while the detail endpoint (/v1/alerts/{id}) returns it in an entity field.
+	// We check both formats.
+	if a.Deployment != nil {
+		// List endpoint format
+		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
+			Type: "DEPLOYMENT",
+			Deployment: &securityv1alpha1.DeploymentInfo{
+				ID:          a.Deployment.ID,
+				Name:        a.Deployment.Name,
+				Namespace:   a.Deployment.Namespace,
+				ClusterID:   a.Deployment.ClusterID,
+				ClusterName: a.Deployment.ClusterName,
+			},
+		}
+	} else if a.Entity != nil {
+		// Detail endpoint format
 		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
 			Type: a.Entity.Type,
 		}
@@ -341,7 +374,23 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 	}
 
 	// Entity information
-	if a.Entity != nil {
+	// The list endpoint (/v1/alerts) returns deployment at the top level,
+	// while the detail endpoint (/v1/alerts/{id}) returns it in an entity field.
+	// We check both formats.
+	if a.Deployment != nil {
+		// List endpoint format
+		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
+			Type: "DEPLOYMENT",
+			Deployment: &securityv1alpha1.DeploymentInfo{
+				ID:          a.Deployment.ID,
+				Name:        a.Deployment.Name,
+				Namespace:   a.Deployment.Namespace,
+				ClusterID:   a.Deployment.ClusterID,
+				ClusterName: a.Deployment.ClusterName,
+			},
+		}
+	} else if a.Entity != nil {
+		// Detail endpoint format
 		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
 			Type: a.Entity.Type,
 		}
