@@ -542,6 +542,29 @@ Benefits:
 * Compatible with existing security tools
 * Multi-format support (SARIF, CycloneDX, SPDX)
 
+### Reconsider ClusterAlert CRD Necessity
+
+Evaluate whether the ClusterAlert CRD is actually needed based on real-world StackRox data:
+
+**Current Observation**: In testing with a live OpenShift cluster, all 91 alerts from StackRox Central had namespace information and were created as namespace-scoped `Alert` resources. Zero `ClusterAlert` resources were created.
+
+**Questions to Answer**:
+* Are there actual cluster-scoped policy violations that lack namespace information?
+* What types of policies trigger alerts without deployment/namespace data?
+* Do orphaned alerts (where the triggering resource was deleted) still retain namespace info?
+* Are there edge cases where ClusterAlert is genuinely needed?
+
+**Potential Outcomes**:
+1. **Remove ClusterAlert entirely** - Simplify the API to only use namespace-scoped Alert
+2. **Keep ClusterAlert for specific cases** - Document exact scenarios when it's used
+3. **Default orphaned alerts to a namespace** - e.g., create them in `stackrox-results` namespace instead of cluster scope
+
+**Investigation Needed**:
+* Test with cluster-scoped policies (admission control, cluster settings)
+* Test with orphaned/deleted deployments
+* Review StackRox policy catalog to identify truly cluster-scoped policies
+* Consult StackRox documentation on alert scoping
+
 ## We Need Your Feedback!
 
 This is a **developer preview** to explore different approaches. We need your input:
