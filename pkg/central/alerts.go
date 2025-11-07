@@ -197,7 +197,7 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 		Spec: securityv1alpha1.AlertSpec{
 			PolicyID:       a.Policy.ID,
 			PolicyName:     a.Policy.Name,
-			PolicySeverity: a.Policy.Severity,
+			PolicySeverity: normalizeAlertSeverity(a.Policy.Severity),
 			LifecycleStage: a.LifecycleStage,
 		},
 	}
@@ -316,7 +316,7 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 		Spec: securityv1alpha1.ClusterAlertSpec{
 			PolicyID:       a.Policy.ID,
 			PolicyName:     a.Policy.Name,
-			PolicySeverity: a.Policy.Severity,
+			PolicySeverity: normalizeAlertSeverity(a.Policy.Severity),
 			LifecycleStage: a.LifecycleStage,
 		},
 	}
@@ -429,6 +429,23 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 }
 
 // Helper functions
+
+func normalizeAlertSeverity(severity string) string {
+	// Normalize StackRox alert severity values to CRD-expected values
+	severity = strings.ToUpper(severity)
+	switch severity {
+	case "CRITICAL", "CRITICAL_SEVERITY":
+		return "CRITICAL"
+	case "HIGH", "HIGH_SEVERITY":
+		return "HIGH"
+	case "MEDIUM", "MEDIUM_SEVERITY":
+		return "MEDIUM"
+	case "LOW", "LOW_SEVERITY":
+		return "LOW"
+	default:
+		return "LOW" // Default to LOW for unknown severities
+	}
+}
 
 func generateAlertName(a *Alert) string {
 	// Generate a Kubernetes-friendly name from alert ID
