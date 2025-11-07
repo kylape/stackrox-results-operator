@@ -1,0 +1,197 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: clusteralerts.security.stackrox.io
+spec:
+  group: security.stackrox.io
+  names:
+    kind: ClusterAlert
+    listKind: ClusterAlertList
+    plural: clusteralerts
+    singular: clusteralert
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.policyName
+      name: Policy
+      type: string
+    - jsonPath: .spec.policySeverity
+      name: Severity
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .spec.lifecycleStage
+      name: Lifecycle
+      type: string
+    - jsonPath: .spec.time
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ClusterAlert is the Schema for the clusteralerts API
+          ClusterAlert represents cluster-scoped policy violations (alerts without a namespace)
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ClusterAlert
+            properties:
+              entity:
+                description: Entity that violated the policy
+                properties:
+                  deployment:
+                    description: Deployment information
+                    properties:
+                      clusterId:
+                        type: string
+                      clusterName:
+                        type: string
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    type: object
+                  image:
+                    description: Image information
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                    type: object
+                  resource:
+                    description: Resource information
+                    properties:
+                      name:
+                        type: string
+                      type:
+                        type: string
+                    type: object
+                  type:
+                    description: Type of entity (Deployment, Pod, Image, Node, Resource)
+                    type: string
+                type: object
+              firstOccurred:
+                description: When this alert was first triggered
+                format: date-time
+                type: string
+              lifecycleStage:
+                description: Lifecycle stage when the violation was detected
+                enum:
+                - DEPLOY
+                - RUNTIME
+                type: string
+              policyCategories:
+                items:
+                  type: string
+                type: array
+              policyDescription:
+                type: string
+              policyId:
+                description: Policy information
+                type: string
+              policyName:
+                type: string
+              policySeverity:
+                enum:
+                - CRITICAL
+                - HIGH
+                - MEDIUM
+                - LOW
+                type: string
+              time:
+                description: When this alert occurred
+                format: date-time
+                type: string
+              violations:
+                description: Violation details
+                items:
+                  description: Violation describes a specific policy violation
+                  properties:
+                    keyValueAttrs:
+                      description: Additional violation attributes
+                      items:
+                        description: KeyValueAttr is a key-value pair for violation
+                          details
+                        properties:
+                          key:
+                            type: string
+                          value:
+                            type: string
+                        required:
+                        - key
+                        - value
+                        type: object
+                      type: array
+                    message:
+                      description: Human-readable violation message
+                      type: string
+                    type:
+                      description: Type of violation
+                      type: string
+                  type: object
+                type: array
+            required:
+            - lifecycleStage
+            - policyId
+            - policyName
+            - policySeverity
+            - time
+            type: object
+          status:
+            description: status defines the observed state of ClusterAlert
+            properties:
+              conditionMessage:
+                description: Current condition message
+                type: string
+              enforcementAction:
+                description: Enforcement action taken
+                type: string
+              enforcementCount:
+                description: Number of times enforcement was applied
+                type: integer
+              resolutionNote:
+                description: Note explaining resolution
+                type: string
+              resolvedAt:
+                description: When the alert was resolved
+                format: date-time
+                type: string
+              state:
+                description: Current state of the alert
+                enum:
+                - ACTIVE
+                - RESOLVED
+                - ATTEMPTED
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

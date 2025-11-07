@@ -309,6 +309,125 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 	return alert
 }
 
+// ConvertToClusterCRD converts a StackRox Alert to a ClusterAlert CRD
+// This is used for cluster-scoped alerts (alerts without a namespace)
+func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
+	alert := &securityv1alpha1.ClusterAlert{
+		Spec: securityv1alpha1.ClusterAlertSpec{
+			PolicyID:       a.Policy.ID,
+			PolicyName:     a.Policy.Name,
+			PolicySeverity: a.Policy.Severity,
+			LifecycleStage: a.LifecycleStage,
+		},
+	}
+
+	// Set metadata
+	alert.Name = generateAlertName(a)
+	alert.Labels = map[string]string{
+		"stackrox.io/alert-id":    a.ID,
+		"stackrox.io/policy-name": sanitizeLabelValue(a.Policy.Name),
+		"stackrox.io/severity":    a.Policy.Severity,
+		"stackrox.io/lifecycle":   a.LifecycleStage,
+	}
+
+	// Policy categories
+	if len(a.Policy.Categories) > 0 {
+		alert.Spec.PolicyCategories = a.Policy.Categories
+	}
+
+	// Policy description
+	if a.Policy.Description != "" {
+		alert.Spec.PolicyDescription = a.Policy.Description
+	}
+
+	// Entity information
+	if a.Entity != nil {
+		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
+			Type: a.Entity.Type,
+		}
+
+		if a.Entity.Deployment != nil {
+			alert.Spec.Entity.Deployment = &securityv1alpha1.DeploymentInfo{
+				ID:          a.Entity.Deployment.ID,
+				Name:        a.Entity.Deployment.Name,
+				Namespace:   a.Entity.Deployment.Namespace,
+				ClusterID:   a.Entity.Deployment.ClusterID,
+				ClusterName: a.Entity.Deployment.ClusterName,
+			}
+		}
+
+		if a.Entity.Image != nil {
+			alert.Spec.Entity.Image = &securityv1alpha1.ImageInfo{
+				ID:   a.Entity.Image.ID,
+				Name: a.Entity.Image.Name,
+			}
+		}
+
+		if a.Entity.Resource != nil {
+			alert.Spec.Entity.Resource = &securityv1alpha1.ResourceInfo{
+				Type: a.Entity.Resource.Type,
+				Name: a.Entity.Resource.Name,
+			}
+		}
+	}
+
+	// Violations
+	if len(a.Violations) > 0 {
+		alert.Spec.Violations = make([]securityv1alpha1.Violation, len(a.Violations))
+		for i, v := range a.Violations {
+			violation := securityv1alpha1.Violation{
+				Message: v.Message,
+				Type:    v.Type,
+			}
+
+			if len(v.KeyValueAttrs) > 0 {
+				violation.KeyValueAttrs = make([]securityv1alpha1.KeyValueAttr, len(v.KeyValueAttrs))
+				for j, kv := range v.KeyValueAttrs {
+					violation.KeyValueAttrs[j] = securityv1alpha1.KeyValueAttr{
+						Key:   kv.Key,
+						Value: kv.Value,
+					}
+				}
+			}
+
+			alert.Spec.Violations[i] = violation
+		}
+	}
+
+	// Timestamps
+	if timeVal, err := parseTime(a.Time); err == nil {
+		alert.Spec.Time = *timeVal
+	}
+
+	if a.FirstOccurred != "" {
+		if timeVal, err := parseTime(a.FirstOccurred); err == nil {
+			alert.Spec.FirstOccurred = timeVal
+		}
+	}
+
+	// Status
+	if a.State != "" {
+		alert.Status.State = a.State
+		alert.Labels["stackrox.io/state"] = a.State
+	}
+
+	if a.ResolvedAt != "" {
+		if timeVal, err := parseTime(a.ResolvedAt); err == nil {
+			alert.Status.ResolvedAt = timeVal
+		}
+	}
+
+	if a.EnforcementAction != "" {
+		alert.Status.EnforcementAction = a.EnforcementAction
+	}
+
+	if a.EnforcementCount > 0 {
+		alert.Status.EnforcementCount = a.EnforcementCount
+	}
+
+	return alert
+}
+
 // Helper functions
 
 func generateAlertName(a *Alert) string {
@@ -337,6 +456,9 @@ func sanitizeLabelValue(value string) string {
 	value = strings.ToLower(value)
 	value = strings.ReplaceAll(value, " ", "-")
 	value = strings.ReplaceAll(value, "_", "-")
+	value = strings.ReplaceAll(value, "@", "-")
+	value = strings.ReplaceAll(value, "/", "-")
+	// Note: "." is allowed in labels, so we keep it
 
 	// Limit to 63 chars
 	if len(value) > 63 {

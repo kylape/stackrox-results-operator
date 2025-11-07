@@ -295,43 +295,71 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 
 	logger.Info("Retrieved alerts from Central", "count", len(alerts))
 
-	// Create/update Alert CRDs
+	// Create/update Alert CRDs (namespace-scoped) and ClusterAlert CRDs (cluster-scoped)
 	createdCount := 0
 	for _, alert := range alerts {
-		crd := alert.ConvertToCRD()
+		// Determine if this is a namespace-scoped or cluster-scoped alert
+		hasNamespace := alert.Entity != nil && alert.Entity.Deployment != nil && alert.Entity.Deployment.Namespace != ""
 
-		// Set namespace from deployment if available
-		if alert.Entity != nil && alert.Entity.Deployment != nil && alert.Entity.Deployment.Namespace != "" {
+		if hasNamespace {
+			// Create/update namespace-scoped Alert
+			crd := alert.ConvertToCRD()
 			crd.Namespace = alert.Entity.Deployment.Namespace
-		} else {
-			// Skip alerts without namespace
-			logger.V(1).Info("Skipping alert without namespace", "alertID", alert.ID)
-			continue
-		}
 
-		// Create or update
-		existing := &securityv1alpha1.Alert{}
-		err := r.Get(ctx, client.ObjectKey{Namespace: crd.Namespace, Name: crd.Name}, existing)
+			// Create or update
+			existing := &securityv1alpha1.Alert{}
+			err := r.Get(ctx, client.ObjectKey{Namespace: crd.Namespace, Name: crd.Name}, existing)
 
-		if apierrors.IsNotFound(err) {
-			// Create new
-			if err := r.Create(ctx, crd); err != nil {
-				logger.Error(err, "Failed to create Alert CRD", "name", crd.Name)
+			if apierrors.IsNotFound(err) {
+				// Create new
+				if err := r.Create(ctx, crd); err != nil {
+					logger.Error(err, "Failed to create Alert CRD", "name", crd.Name)
+					continue
+				}
+				createdCount++
+				logger.V(1).Info("Created Alert CRD", "name", crd.Name, "namespace", crd.Namespace)
+			} else if err == nil {
+				// Update existing
+				crd.ResourceVersion = existing.ResourceVersion
+				if err := r.Update(ctx, crd); err != nil {
+					logger.Error(err, "Failed to update Alert CRD", "name", crd.Name)
+					continue
+				}
+				createdCount++
+				logger.V(1).Info("Updated Alert CRD", "name", crd.Name, "namespace", crd.Namespace)
+			} else {
+				logger.Error(err, "Failed to get Alert CRD", "name", crd.Name)
 				continue
 			}
-			createdCount++
-			logger.V(1).Info("Created Alert CRD", "name", crd.Name, "namespace", crd.Namespace)
-		} else if err == nil {
-			// Update existing
-			crd.ResourceVersion = existing.ResourceVersion
-			if err := r.Update(ctx, crd); err != nil {
-				logger.Error(err, "Failed to update Alert CRD", "name", crd.Name)
+		} else {
+			// Create/update cluster-scoped ClusterAlert
+			crd := alert.ConvertToClusterCRD()
+
+			// Create or update
+			existing := &securityv1alpha1.ClusterAlert{}
+			err := r.Get(ctx, client.ObjectKey{Name: crd.Name}, existing)
+
+			if apierrors.IsNotFound(err) {
+				// Create new
+				if err := r.Create(ctx, crd); err != nil {
+					logger.Error(err, "Failed to create ClusterAlert CRD", "name", crd.Name)
+					continue
+				}
+				createdCount++
+				logger.V(1).Info("Created ClusterAlert CRD", "name", crd.Name)
+			} else if err == nil {
+				// Update existing
+				crd.ResourceVersion = existing.ResourceVersion
+				if err := r.Update(ctx, crd); err != nil {
+					logger.Error(err, "Failed to update ClusterAlert CRD", "name", crd.Name)
+					continue
+				}
+				createdCount++
+				logger.V(1).Info("Updated ClusterAlert CRD", "name", crd.Name)
+			} else {
+				logger.Error(err, "Failed to get ClusterAlert CRD", "name", crd.Name)
 				continue
 			}
-			createdCount++
-			logger.V(1).Info("Updated Alert CRD", "name", crd.Name, "namespace", crd.Namespace)
-		} else {
-			logger.Error(err, "Failed to get Alert CRD", "name", crd.Name)
 		}
 	}
 
