@@ -55,6 +55,10 @@ type CentralConfig struct {
 	// +kubebuilder:validation:Required
 	AuthSecretName string `json:"authSecretName"`
 
+	// Namespace where the auth secret is located
+	// +kubebuilder:validation:Required
+	AuthSecretNamespace string `json:"authSecretNamespace"`
+
 	// TLS configuration
 	// +optional
 	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
@@ -223,7 +227,7 @@ type ExportedResourceCounts struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:path=resultsexporters,scope=Namespaced
+// +kubebuilder:resource:path=resultsexporters,scope=Cluster
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Central",type=string,JSONPath=`.status.conditions[?(@.type=="CentralConnected")].status`
 // +kubebuilder:printcolumn:name="Alerts",type=integer,JSONPath=`.status.exportedResources.alerts`

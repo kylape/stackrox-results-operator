@@ -179,7 +179,7 @@ func (r *ResultsExporterReconciler) createCentralClient(ctx context.Context, exp
 		Endpoint:       exporter.Spec.Central.Endpoint,
 		TLSConfig:      exporter.Spec.Central.TLSConfig,
 		AuthSecretName: exporter.Spec.Central.AuthSecretName,
-		Namespace:      exporter.Namespace,
+		Namespace:      exporter.Spec.Central.AuthSecretNamespace,
 		K8sClient:      r.Client,
 	}
 

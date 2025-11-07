@@ -118,28 +118,31 @@ kubectl apply -f config/manager/manager.yaml
 3. Create a secret with Central credentials:
 
 ```bash
+# Create the secret in your desired namespace (e.g., stackrox-operator)
 # Using API token
 kubectl create secret generic central-auth \
+  -n stackrox-operator \
   --from-literal=token='your-api-token'
 
 # OR using htpasswd
 kubectl create secret generic central-auth \
+  -n stackrox-operator \
   --from-literal=username='admin' \
   --from-literal=password='your-password'
 ```
 
-4. Create a `ResultsExporter` resource:
+4. Create a `ResultsExporter` resource (cluster-scoped):
 
 ```yaml
 apiVersion: results.stackrox.io/v1alpha1
 kind: ResultsExporter
 metadata:
   name: stackrox-exporter
-  namespace: stackrox-operator
 spec:
   central:
     endpoint: https://central.stackrox.svc:443
     authSecretName: central-auth
+    authSecretNamespace: stackrox-operator  # Namespace where the secret is located
     tlsConfig:
       insecureSkipVerify: false  # Set to true for self-signed certs in dev
 
@@ -390,7 +393,13 @@ kubectl get securityresults -A -o json \
 
 ### Configuration CRD (results.stackrox.io/v1alpha1)
 
-* **ResultsExporter** (namespaced): Operator configuration
+* **ResultsExporter** (cluster-scoped): Operator configuration - one per cluster
+
+**Why cluster-scoped?** ResultsExporter is cluster-scoped because:
+* There's typically one StackRox Central instance per cluster
+* Most output CRDs are cluster-scoped (ClusterAlert, ImageVulnerability, NodeVulnerability)
+* Prevents confusion from multiple conflicting configurations
+* Matches the deployment model (one operator instance per cluster)
 
 See `/api` directory for complete type definitions.
 
@@ -473,6 +482,65 @@ To compare both patterns:
 - [ ] Performance optimizations
 - [ ] HA support
 - [ ] Advanced use cases
+
+## Backlog
+
+Features and enhancements being considered for future releases:
+
+### Namespace Filtering
+Add configuration to ResultsExporter CRD to selectively include/exclude namespaces from results:
+
+```yaml
+spec:
+  exports:
+    namespaceSelector:
+      # Include only these namespaces (if specified)
+      include:
+        matchLabels:
+          environment: production
+        matchExpressions:
+          - {key: team, operator: In, values: [platform, security]}
+
+      # Exclude these namespaces (applied after include)
+      exclude:
+        matchLabels:
+          monitoring: prometheus
+        matchNames:
+          - kube-system
+          - kube-public
+
+    # How to handle cluster-scoped resources (alerts without namespace)
+    clusterScopedResources: include  # include, exclude, or separate
+```
+
+Benefits:
+* Reduce noise by filtering out non-production namespaces
+* Separate production/staging/dev exports
+* Exclude system namespaces
+* Control what data gets exported to Git
+
+### Open Reports API Integration
+Support [OpenReports](https://openreports.io/) format for standardized security reporting:
+
+```yaml
+spec:
+  exports:
+    openReports:
+      enabled: true
+      format: sarif  # SARIF, CycloneDX, SPDX, etc.
+      output:
+        - type: kubernetes
+          configMapName: security-report
+        - type: s3
+          bucket: security-reports
+          path: /cluster-name/
+```
+
+Benefits:
+* Standardized report format for tool interoperability
+* Integration with CI/CD pipelines
+* Compatible with existing security tools
+* Multi-format support (SARIF, CycloneDX, SPDX)
 
 ## We Need Your Feedback!
 

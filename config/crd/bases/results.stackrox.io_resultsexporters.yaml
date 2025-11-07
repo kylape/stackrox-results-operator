@@ -12,7 +12,7 @@ spec:
     listKind: ResultsExporterList
     plural: resultsexporters
     singular: resultsexporter
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
@@ -73,6 +73,9 @@ spec:
                     description: Secret containing auth credentials (htpasswd or API
                       token)
                     type: string
+                  authSecretNamespace:
+                    description: Namespace where the auth secret is located
+                    type: string
                   endpoint:
                     description: Central API endpoint
                     pattern: ^https?://.*
@@ -89,6 +92,7 @@ spec:
                     type: object
                 required:
                 - authSecretName
+                - authSecretNamespace
                 - endpoint
                 type: object
               exports:
