@@ -92,13 +92,13 @@ type CVE struct {
 }
 
 type CVSSv3 struct {
-	Score  string `json:"score"`
-	Vector string `json:"vector"`
+	Score  float64 `json:"score"`
+	Vector string  `json:"vector"`
 }
 
 type EPSS struct {
-	Score      string `json:"score"`
-	Percentile string `json:"percentile"`
+	Score      float64 `json:"score"`
+	Percentile float64 `json:"percentile"`
 }
 
 type VulnSummary struct {
@@ -531,21 +531,49 @@ func convertVulnSummary(summary *VulnSummary) securityv1alpha1.VulnerabilitySumm
 	return result
 }
 
+func normalizeSeverity(severity string) string {
+	// Normalize StackRox severity values to CRD-expected values
+	severity = strings.ToUpper(severity)
+	switch severity {
+	case "CRITICAL", "CRITICAL_VULNERABILITY_SEVERITY":
+		return "CRITICAL"
+	case "HIGH", "IMPORTANT", "IMPORTANT_VULNERABILITY_SEVERITY":
+		return "HIGH"
+	case "MEDIUM", "MODERATE", "MODERATE_VULNERABILITY_SEVERITY":
+		return "MEDIUM"
+	case "LOW", "LOW_VULNERABILITY_SEVERITY":
+		return "LOW"
+	case "UNKNOWN", "UNKNOWN_VULNERABILITY_SEVERITY", "":
+		return "LOW" // Default unknown to LOW
+	default:
+		return "LOW"
+	}
+}
+
 func convertCVE(cve *CVE) securityv1alpha1.CVE {
+	cvssStr := ""
+	if cve.CVSS > 0 {
+		cvssStr = fmt.Sprintf("%.1f", cve.CVSS)
+	}
+
 	result := securityv1alpha1.CVE{
 		CVE:      cve.CVE,
-		Severity: cve.Severity,
+		Severity: normalizeSeverity(cve.Severity),
 		Summary:  cve.Summary,
 		Link:     cve.Link,
-		CVSS:     cve.CVSS,
+		CVSS:     cvssStr,
 		Fixable:  cve.Fixable,
 		FixedBy:  cve.FixedBy,
 		State:    cve.State,
 	}
 
 	if cve.CVSSv3 != nil {
+		cvssv3ScoreStr := ""
+		if cve.CVSSv3.Score > 0 {
+			cvssv3ScoreStr = fmt.Sprintf("%.1f", cve.CVSSv3.Score)
+		}
 		result.CVSSv3 = &securityv1alpha1.CVSSv3{
-			Score:  cve.CVSSv3.Score,
+			Score:  cvssv3ScoreStr,
 			Vector: cve.CVSSv3.Vector,
 		}
 	}
@@ -559,9 +587,17 @@ func convertCVE(cve *CVE) securityv1alpha1.CVE {
 	}
 
 	if cve.EPSS != nil {
+		epssScoreStr := ""
+		if cve.EPSS.Score > 0 {
+			epssScoreStr = fmt.Sprintf("%.5f", cve.EPSS.Score)
+		}
+		epssPercentileStr := ""
+		if cve.EPSS.Percentile > 0 {
+			epssPercentileStr = fmt.Sprintf("%.5f", cve.EPSS.Percentile)
+		}
 		result.EPSS = &securityv1alpha1.EPSS{
-			Score:      cve.EPSS.Score,
-			Percentile: cve.EPSS.Percentile,
+			Score:      epssScoreStr,
+			Percentile: epssPercentileStr,
 		}
 	}
 
@@ -604,13 +640,15 @@ func generateImageVulnName(fullName, sha string) string {
 		tag = strings.Split(tag, "@")[0]
 	}
 
-	// Clean up
+	// Clean up - remove all invalid Kubernetes name characters
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, "/", "-")
 	name = strings.ReplaceAll(name, ".", "-")
+	name = strings.ReplaceAll(name, "@", "-")
 
 	tag = strings.ToLower(tag)
 	tag = strings.ReplaceAll(tag, ".", "-")
+	tag = strings.ReplaceAll(tag, "@", "-")
 
 	// Use short SHA
 	shortSHA := ""
