@@ -317,22 +317,28 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 			err := r.Get(ctx, client.ObjectKey{Namespace: crd.Namespace, Name: crd.Name}, existing)
 
 			if apierrors.IsNotFound(err) {
-				// Create new
+				// Create new resource (with empty spec)
 				if err := r.Create(ctx, crd); err != nil {
 					logger.Error(err, "Failed to create Alert CRD", "name", crd.Name)
 					continue
 				}
-				createdCount++
 				logger.V(1).Info("Created Alert CRD", "name", crd.Name, "namespace", crd.Namespace)
-			} else if err == nil {
-				// Update existing
-				crd.ResourceVersion = existing.ResourceVersion
-				if err := r.Update(ctx, crd); err != nil {
-					logger.Error(err, "Failed to update Alert CRD", "name", crd.Name)
+
+				// Update status subresource
+				if err := r.Status().Update(ctx, crd); err != nil {
+					logger.Error(err, "Failed to update Alert status", "name", crd.Name)
 					continue
 				}
 				createdCount++
-				logger.V(1).Info("Updated Alert CRD", "name", crd.Name, "namespace", crd.Namespace)
+			} else if err == nil {
+				// Resource exists - update status subresource
+				crd.ResourceVersion = existing.ResourceVersion
+				if err := r.Status().Update(ctx, crd); err != nil {
+					logger.Error(err, "Failed to update Alert status", "name", crd.Name)
+					continue
+				}
+				createdCount++
+				logger.V(1).Info("Updated Alert status", "name", crd.Name, "namespace", crd.Namespace)
 			} else {
 				logger.Error(err, "Failed to get Alert CRD", "name", crd.Name)
 				continue
@@ -346,22 +352,28 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 			err := r.Get(ctx, client.ObjectKey{Name: crd.Name}, existing)
 
 			if apierrors.IsNotFound(err) {
-				// Create new
+				// Create new resource (with empty spec)
 				if err := r.Create(ctx, crd); err != nil {
 					logger.Error(err, "Failed to create ClusterAlert CRD", "name", crd.Name)
 					continue
 				}
-				createdCount++
 				logger.V(1).Info("Created ClusterAlert CRD", "name", crd.Name)
-			} else if err == nil {
-				// Update existing
-				crd.ResourceVersion = existing.ResourceVersion
-				if err := r.Update(ctx, crd); err != nil {
-					logger.Error(err, "Failed to update ClusterAlert CRD", "name", crd.Name)
+
+				// Update status subresource
+				if err := r.Status().Update(ctx, crd); err != nil {
+					logger.Error(err, "Failed to update ClusterAlert status", "name", crd.Name)
 					continue
 				}
 				createdCount++
-				logger.V(1).Info("Updated ClusterAlert CRD", "name", crd.Name)
+			} else if err == nil {
+				// Resource exists - update status subresource
+				crd.ResourceVersion = existing.ResourceVersion
+				if err := r.Status().Update(ctx, crd); err != nil {
+					logger.Error(err, "Failed to update ClusterAlert status", "name", crd.Name)
+					continue
+				}
+				createdCount++
+				logger.V(1).Info("Updated ClusterAlert status", "name", crd.Name)
 			} else {
 				logger.Error(err, "Failed to get ClusterAlert CRD", "name", crd.Name)
 				continue
@@ -412,22 +424,28 @@ func (r *ResultsExporterReconciler) syncImageVulnerabilitiesIndividual(ctx conte
 		err := r.Get(ctx, client.ObjectKey{Name: crd.Name}, existing)
 
 		if apierrors.IsNotFound(err) {
-			// Create new
+			// Create new resource (with empty spec)
 			if err := r.Create(ctx, crd); err != nil {
 				logger.Error(err, "Failed to create ImageVulnerability CRD", "name", crd.Name)
 				continue
 			}
-			createdCount++
 			logger.V(1).Info("Created ImageVulnerability CRD", "name", crd.Name)
-		} else if err == nil {
-			// Update existing
-			crd.ResourceVersion = existing.ResourceVersion
-			if err := r.Update(ctx, crd); err != nil {
-				logger.Error(err, "Failed to update ImageVulnerability CRD", "name", crd.Name)
+
+			// Update status subresource
+			if err := r.Status().Update(ctx, crd); err != nil {
+				logger.Error(err, "Failed to update ImageVulnerability status", "name", crd.Name)
 				continue
 			}
 			createdCount++
-			logger.V(1).Info("Updated ImageVulnerability CRD", "name", crd.Name)
+		} else if err == nil {
+			// Resource exists - update status subresource
+			crd.ResourceVersion = existing.ResourceVersion
+			if err := r.Status().Update(ctx, crd); err != nil {
+				logger.Error(err, "Failed to update ImageVulnerability status", "name", crd.Name)
+				continue
+			}
+			createdCount++
+			logger.V(1).Info("Updated ImageVulnerability status", "name", crd.Name)
 		} else {
 			logger.Error(err, "Failed to get ImageVulnerability CRD", "name", crd.Name)
 		}
@@ -473,22 +491,28 @@ func (r *ResultsExporterReconciler) syncNodeVulnerabilitiesIndividual(ctx contex
 		err := r.Get(ctx, client.ObjectKey{Name: crd.Name}, existing)
 
 		if apierrors.IsNotFound(err) {
-			// Create new
+			// Create new resource (with empty spec)
 			if err := r.Create(ctx, crd); err != nil {
 				logger.Error(err, "Failed to create NodeVulnerability CRD", "name", crd.Name)
 				continue
 			}
-			createdCount++
 			logger.V(1).Info("Created NodeVulnerability CRD", "name", crd.Name)
-		} else if err == nil {
-			// Update existing
-			crd.ResourceVersion = existing.ResourceVersion
-			if err := r.Update(ctx, crd); err != nil {
-				logger.Error(err, "Failed to update NodeVulnerability CRD", "name", crd.Name)
+
+			// Update status subresource
+			if err := r.Status().Update(ctx, crd); err != nil {
+				logger.Error(err, "Failed to update NodeVulnerability status", "name", crd.Name)
 				continue
 			}
 			createdCount++
-			logger.V(1).Info("Updated NodeVulnerability CRD", "name", crd.Name)
+		} else if err == nil {
+			// Resource exists - update status subresource
+			crd.ResourceVersion = existing.ResourceVersion
+			if err := r.Status().Update(ctx, crd); err != nil {
+				logger.Error(err, "Failed to update NodeVulnerability status", "name", crd.Name)
+				continue
+			}
+			createdCount++
+			logger.V(1).Info("Updated NodeVulnerability status", "name", crd.Name)
 		} else {
 			logger.Error(err, "Failed to get NodeVulnerability CRD", "name", crd.Name)
 		}
