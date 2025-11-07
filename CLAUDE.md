@@ -8,10 +8,27 @@ The StackRox Results Operator is a Kubernetes operator that exports StackRox/RHA
 
 ## Development Environment
 
-* **Registry**: quay.io/klape/stackrox-results-operator
-* **Kubernetes**: OpenShift cluster (or kind cluster with name `stackrox-all-the-crds`)
+* **Kubernetes**: OpenShift cluster (or kind cluster)
 * **Operator Namespace**: stackrox-results-operator-system
 * **StackRox Central**: https://central.stackrox.svc:443
+
+### Configure Image Registry
+
+At the start of each development session, set the image registry based on your environment:
+
+```bash
+# For OpenShift or remote clusters (push to quay.io)
+export IMG_REGISTRY="quay.io/klape"
+
+# For local kind clusters (load directly into cluster)
+export IMG_REGISTRY="kind-registry:5000"
+export KIND_CLUSTER="stackrox-all-the-crds"  # Your kind cluster name
+
+# For other registries
+export IMG_REGISTRY="docker.io/myuser"
+```
+
+This keeps the workflow generic and works with any infrastructure setup.
 
 ## Build-Deploy-Test Loop
 
@@ -25,27 +42,35 @@ Edit files in:
 ### 2. Build the Operator Image
 
 ```bash
-# Increment version number (e.g., v10 -> v11)
-export VERSION=v11
-make docker-build IMG=quay.io/klape/stackrox-results-operator:${VERSION}
+# Increment version number (e.g., v10 -> v11) or use timestamp
+export VERSION=v11  # or VERSION=v$(date +%s) for auto-versioning
+make docker-build IMG=${IMG_REGISTRY}/stackrox-results-operator:${VERSION}
 ```
 
 This uses podman to build the multi-stage Dockerfile.
 
-### 3. Push to Quay.io
+### 3. Push or Load Image
+
+**For remote clusters (OpenShift, etc.):**
 
 ```bash
-podman push quay.io/klape/stackrox-results-operator:${VERSION}
+# Push to registry (ensure you're authenticated first)
+podman push ${IMG_REGISTRY}/stackrox-results-operator:${VERSION}
 ```
 
-**Note**: Ensure you're authenticated to quay.io first with `podman login quay.io`
+**For local kind clusters:**
+
+```bash
+# Load directly into kind cluster (no push needed)
+kind load docker-image ${IMG_REGISTRY}/stackrox-results-operator:${VERSION} --name ${KIND_CLUSTER}
+```
 
 ### 4. Update the Deployment
 
 ```bash
 # Update the operator deployment to use new image
 kubectl set image deployment/stackrox-results-operator-controller-manager \
-  manager=quay.io/klape/stackrox-results-operator:${VERSION} \
+  manager=${IMG_REGISTRY}/stackrox-results-operator:${VERSION} \
   -n stackrox-results-operator-system
 
 # Wait for rollout to complete
@@ -97,18 +122,34 @@ kubectl get alert <name> -n <namespace> -o yaml
 
 ## Quick Build-Deploy Script
 
-For rapid iteration, you can use this one-liner:
+For rapid iteration, you can use these one-liners:
+
+**For remote clusters (OpenShift, etc.):**
 
 ```bash
 export VERSION=v$(date +%s) && \
-make docker-build IMG=quay.io/klape/stackrox-results-operator:${VERSION} && \
-podman push quay.io/klape/stackrox-results-operator:${VERSION} && \
+make docker-build IMG=${IMG_REGISTRY}/stackrox-results-operator:${VERSION} && \
+podman push ${IMG_REGISTRY}/stackrox-results-operator:${VERSION} && \
 kubectl set image deployment/stackrox-results-operator-controller-manager \
-  manager=quay.io/klape/stackrox-results-operator:${VERSION} \
+  manager=${IMG_REGISTRY}/stackrox-results-operator:${VERSION} \
   -n stackrox-results-operator-system && \
 kubectl rollout status deployment/stackrox-results-operator-controller-manager \
   -n stackrox-results-operator-system && \
-echo "Deployed version: ${VERSION}"
+echo "✅ Deployed version: ${VERSION}"
+```
+
+**For local kind clusters:**
+
+```bash
+export VERSION=v$(date +%s) && \
+make docker-build IMG=${IMG_REGISTRY}/stackrox-results-operator:${VERSION} && \
+kind load docker-image ${IMG_REGISTRY}/stackrox-results-operator:${VERSION} --name ${KIND_CLUSTER} && \
+kubectl set image deployment/stackrox-results-operator-controller-manager \
+  manager=${IMG_REGISTRY}/stackrox-results-operator:${VERSION} \
+  -n stackrox-results-operator-system && \
+kubectl rollout status deployment/stackrox-results-operator-controller-manager \
+  -n stackrox-results-operator-system && \
+echo "✅ Deployed version: ${VERSION}"
 ```
 
 ## Testing Changes
@@ -259,17 +300,19 @@ The operator uses these StackRox Central API endpoints:
 
 ## Common Gotchas
 
-1. **CRD Scope is Immutable**: You cannot change a CRD from namespace-scoped to cluster-scoped (or vice versa) with `kubectl apply`. You must delete and recreate the CRD.
+1. **Set IMG_REGISTRY First**: Always export `IMG_REGISTRY` (and `KIND_CLUSTER` for kind) at the start of your development session. This ensures consistency across all commands.
 
-2. **ResultsExporter is Cluster-Scoped**: Only one ResultsExporter per cluster. It specifies where the auth secret lives via `authSecretNamespace`.
+2. **CRD Scope is Immutable**: You cannot change a CRD from namespace-scoped to cluster-scoped (or vice versa) with `kubectl apply`. You must delete and recreate the CRD.
 
-3. **Alert vs ClusterAlert**: Alerts with namespace information go in namespace-scoped `Alert` CRDs. Only alerts without namespace go in `ClusterAlert` CRDs.
+3. **ResultsExporter is Cluster-Scoped**: Only one ResultsExporter per cluster. It specifies where the auth secret lives via `authSecretNamespace`.
 
-4. **API Response Format Differences**: `/v1/alerts` (list) and `/v1/alerts/{id}` (detail) return different JSON structures. The code handles both.
+4. **Alert vs ClusterAlert**: Alerts with namespace information go in namespace-scoped `Alert` CRDs. Only alerts without namespace go in `ClusterAlert` CRDs.
 
-5. **Image Pushing Requires Auth**: Must be logged in to quay.io with `podman login quay.io` before pushing.
+5. **API Response Format Differences**: `/v1/alerts` (list) and `/v1/alerts/{id}` (detail) return different JSON structures. The code handles both.
 
-6. **Operator Caching**: Sometimes you need to delete existing CRDs to see changes take effect, as the operator may not update existing resources.
+6. **Image Pushing Requires Auth**: For remote registries, you must be logged in (e.g., `podman login quay.io`) before pushing. For kind clusters, use `kind load docker-image` instead.
+
+7. **Operator Caching**: Sometimes you need to delete existing CRDs to see changes take effect, as the operator may not update existing resources.
 
 ## Committing Changes
 
