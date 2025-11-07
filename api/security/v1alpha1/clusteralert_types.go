@@ -100,6 +100,8 @@ type ClusterAlertStatus struct {
 // +kubebuilder:resource:path=clusteralerts,scope=Cluster
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.policyName`
 // +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.status.policySeverity`
+// +kubebuilder:printcolumn:name="Entity Type",type=string,JSONPath=`.status.entity.type`
+// +kubebuilder:printcolumn:name="Entity",type=string,JSONPath=`.status.entity.name`
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Lifecycle",type=string,JSONPath=`.status.lifecycleStage`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.status.time`

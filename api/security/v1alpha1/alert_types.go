@@ -36,53 +36,29 @@ type AlertEntity struct {
 	// +optional
 	Type string `json:"type,omitempty"`
 
-	// Deployment information
-	// +optional
-	Deployment *DeploymentInfo `json:"deployment,omitempty"`
-
-	// Image information
-	// +optional
-	Image *ImageInfo `json:"image,omitempty"`
-
-	// Resource information
-	// +optional
-	Resource *ResourceInfo `json:"resource,omitempty"`
-}
-
-// DeploymentInfo contains deployment details
-type DeploymentInfo struct {
+	// Entity name (deployment name, image name, resource name, etc.)
 	// +optional
 	Name string `json:"name,omitempty"`
 
+	// Entity ID
 	// +optional
 	ID string `json:"id,omitempty"`
 
+	// Namespace (for namespaced entities)
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 
+	// Cluster name
 	// +optional
 	ClusterName string `json:"clusterName,omitempty"`
 
+	// Cluster ID
 	// +optional
 	ClusterID string `json:"clusterId,omitempty"`
-}
 
-// ImageInfo contains image details
-type ImageInfo struct {
+	// Resource type (for Resource entities - e.g., "Secret", "ConfigMap")
 	// +optional
-	Name string `json:"name,omitempty"`
-
-	// +optional
-	ID string `json:"id,omitempty"`
-}
-
-// ResourceInfo contains generic resource details
-type ResourceInfo struct {
-	// +optional
-	Type string `json:"type,omitempty"`
-
-	// +optional
-	Name string `json:"name,omitempty"`
+	ResourceType string `json:"resourceType,omitempty"`
 }
 
 // Violation describes a specific policy violation
@@ -181,6 +157,8 @@ type AlertStatus struct {
 // +kubebuilder:resource:path=alerts,scope=Namespaced
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.policyName`
 // +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.status.policySeverity`
+// +kubebuilder:printcolumn:name="Entity Type",type=string,JSONPath=`.status.entity.type`
+// +kubebuilder:printcolumn:name="Entity",type=string,JSONPath=`.status.entity.name`
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Lifecycle",type=string,JSONPath=`.status.lifecycleStage`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.status.time`

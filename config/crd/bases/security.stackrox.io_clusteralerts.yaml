@@ -21,6 +21,12 @@ spec:
     - jsonPath: .status.policySeverity
       name: Severity
       type: string
+    - jsonPath: .status.entity.type
+      name: Entity Type
+      type: string
+    - jsonPath: .status.entity.name
+      name: Entity
+      type: string
     - jsonPath: .status.state
       name: State
       type: string
@@ -72,36 +78,26 @@ spec:
               entity:
                 description: Entity that violated the policy
                 properties:
-                  deployment:
-                    description: Deployment information
-                    properties:
-                      clusterId:
-                        type: string
-                      clusterName:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      namespace:
-                        type: string
-                    type: object
-                  image:
-                    description: Image information
-                    properties:
-                      id:
-                        type: string
-                      name:
-                        type: string
-                    type: object
-                  resource:
-                    description: Resource information
-                    properties:
-                      name:
-                        type: string
-                      type:
-                        type: string
-                    type: object
+                  clusterId:
+                    description: Cluster ID
+                    type: string
+                  clusterName:
+                    description: Cluster name
+                    type: string
+                  id:
+                    description: Entity ID
+                    type: string
+                  name:
+                    description: Entity name (deployment name, image name, resource
+                      name, etc.)
+                    type: string
+                  namespace:
+                    description: Namespace (for namespaced entities)
+                    type: string
+                  resourceType:
+                    description: Resource type (for Resource entities - e.g., "Secret",
+                      "ConfigMap")
+                    type: string
                   type:
                     description: Type of entity (Deployment, Pod, Image, Node, Resource)
                     type: string

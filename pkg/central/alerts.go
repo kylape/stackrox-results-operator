@@ -246,14 +246,12 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 	if a.Deployment != nil {
 		// List endpoint format
 		alert.Status.Entity = &securityv1alpha1.AlertEntity{
-			Type: "DEPLOYMENT",
-			Deployment: &securityv1alpha1.DeploymentInfo{
-				ID:          a.Deployment.ID,
-				Name:        a.Deployment.Name,
-				Namespace:   a.Deployment.Namespace,
-				ClusterID:   a.Deployment.ClusterID,
-				ClusterName: a.Deployment.ClusterName,
-			},
+			Type:        "DEPLOYMENT",
+			ID:          a.Deployment.ID,
+			Name:        a.Deployment.Name,
+			Namespace:   a.Deployment.Namespace,
+			ClusterID:   a.Deployment.ClusterID,
+			ClusterName: a.Deployment.ClusterName,
 		}
 	} else if a.Entity != nil {
 		// Detail endpoint format
@@ -262,27 +260,21 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 		}
 
 		if a.Entity.Deployment != nil {
-			alert.Status.Entity.Deployment = &securityv1alpha1.DeploymentInfo{
-				ID:          a.Entity.Deployment.ID,
-				Name:        a.Entity.Deployment.Name,
-				Namespace:   a.Entity.Deployment.Namespace,
-				ClusterID:   a.Entity.Deployment.ClusterID,
-				ClusterName: a.Entity.Deployment.ClusterName,
-			}
+			alert.Status.Entity.ID = a.Entity.Deployment.ID
+			alert.Status.Entity.Name = a.Entity.Deployment.Name
+			alert.Status.Entity.Namespace = a.Entity.Deployment.Namespace
+			alert.Status.Entity.ClusterID = a.Entity.Deployment.ClusterID
+			alert.Status.Entity.ClusterName = a.Entity.Deployment.ClusterName
 		}
 
 		if a.Entity.Image != nil {
-			alert.Status.Entity.Image = &securityv1alpha1.ImageInfo{
-				ID:   a.Entity.Image.ID,
-				Name: a.Entity.Image.Name,
-			}
+			alert.Status.Entity.ID = a.Entity.Image.ID
+			alert.Status.Entity.Name = a.Entity.Image.Name
 		}
 
 		if a.Entity.Resource != nil {
-			alert.Status.Entity.Resource = &securityv1alpha1.ResourceInfo{
-				Type: a.Entity.Resource.Type,
-				Name: a.Entity.Resource.Name,
-			}
+			alert.Status.Entity.ResourceType = a.Entity.Resource.Type
+			alert.Status.Entity.Name = a.Entity.Resource.Name
 		}
 	}
 
@@ -382,14 +374,12 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 	if a.Deployment != nil {
 		// List endpoint format
 		alert.Status.Entity = &securityv1alpha1.AlertEntity{
-			Type: "DEPLOYMENT",
-			Deployment: &securityv1alpha1.DeploymentInfo{
-				ID:          a.Deployment.ID,
-				Name:        a.Deployment.Name,
-				Namespace:   a.Deployment.Namespace,
-				ClusterID:   a.Deployment.ClusterID,
-				ClusterName: a.Deployment.ClusterName,
-			},
+			Type:        "DEPLOYMENT",
+			ID:          a.Deployment.ID,
+			Name:        a.Deployment.Name,
+			Namespace:   a.Deployment.Namespace,
+			ClusterID:   a.Deployment.ClusterID,
+			ClusterName: a.Deployment.ClusterName,
 		}
 	} else if a.Entity != nil {
 		// Detail endpoint format
@@ -398,27 +388,21 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 		}
 
 		if a.Entity.Deployment != nil {
-			alert.Status.Entity.Deployment = &securityv1alpha1.DeploymentInfo{
-				ID:          a.Entity.Deployment.ID,
-				Name:        a.Entity.Deployment.Name,
-				Namespace:   a.Entity.Deployment.Namespace,
-				ClusterID:   a.Entity.Deployment.ClusterID,
-				ClusterName: a.Entity.Deployment.ClusterName,
-			}
+			alert.Status.Entity.ID = a.Entity.Deployment.ID
+			alert.Status.Entity.Name = a.Entity.Deployment.Name
+			alert.Status.Entity.Namespace = a.Entity.Deployment.Namespace
+			alert.Status.Entity.ClusterID = a.Entity.Deployment.ClusterID
+			alert.Status.Entity.ClusterName = a.Entity.Deployment.ClusterName
 		}
 
 		if a.Entity.Image != nil {
-			alert.Status.Entity.Image = &securityv1alpha1.ImageInfo{
-				ID:   a.Entity.Image.ID,
-				Name: a.Entity.Image.Name,
-			}
+			alert.Status.Entity.ID = a.Entity.Image.ID
+			alert.Status.Entity.Name = a.Entity.Image.Name
 		}
 
 		if a.Entity.Resource != nil {
-			alert.Status.Entity.Resource = &securityv1alpha1.ResourceInfo{
-				Type: a.Entity.Resource.Type,
-				Name: a.Entity.Resource.Name,
-			}
+			alert.Status.Entity.ResourceType = a.Entity.Resource.Type
+			alert.Status.Entity.Name = a.Entity.Resource.Name
 		}
 	}
 
