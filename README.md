@@ -23,7 +23,8 @@ This operator supports **two different patterns** for representing security data
 
 Creates one CRD per security finding:
 
-* `Alert` - One per policy violation
+* `Alert` - One per namespace-scoped policy violation (e.g., deployment violations)
+* `ClusterAlert` - One per cluster-scoped policy violation (e.g., cluster config violations)
 * `ImageVulnerability` - One per container image
 * `NodeVulnerability` - One per Kubernetes node
 
@@ -44,6 +45,11 @@ $ kubectl get alerts -n production
 NAME                                    POLICY                          SEVERITY   STATE
 alert-ubuntu-pkg-manager-exec-abc123   Ubuntu Package Manager Execution CRITICAL   ACTIVE
 alert-curl-binary-detected-def456      Curl Binary Detected            HIGH       ACTIVE
+
+$ kubectl get clusteralerts
+NAME                                            POLICY                                   SEVERITY   STATE
+alert-fixable-severity-at-least-impo-4a7021ea  Fixable Severity at least Important      HIGH       ACTIVE
+alert-privileged-containers-with-imp-39fc1c10  Privileged Containers with Important CVEs HIGH       ACTIVE
 
 $ kubectl get imagevulnerabilities
 NAME                                    IMAGE                         CRITICAL   HIGH   TOTAL
@@ -175,6 +181,7 @@ kubectl get resultsexporter stackrox-exporter -o yaml
 
 # Check exported resources (individual mode)
 kubectl get alerts --all-namespaces
+kubectl get clusteralerts
 kubectl get imagevulnerabilities
 kubectl get nodevulnerabilities
 
@@ -233,7 +240,7 @@ imageVulnerabilities:
 ### Individual Mode Commands
 
 ```bash
-# List all alerts
+# List all namespace-scoped alerts
 kubectl get alerts --all-namespaces
 
 # Get alerts in specific namespace
@@ -247,6 +254,18 @@ kubectl get alerts -l severity=CRITICAL
 
 # Watch for new alerts
 kubectl get alerts -n production -w
+
+# List all cluster-scoped alerts (alerts without a namespace)
+kubectl get clusteralerts
+
+# Show cluster alert details
+kubectl describe clusteralert alert-fixable-severity-at-least-impo-4a7021ea
+
+# Filter cluster alerts by severity
+kubectl get clusteralerts -l stackrox.io/severity=HIGH
+
+# Watch for new cluster alerts
+kubectl get clusteralerts -w
 
 # List image vulnerabilities
 kubectl get imagevulnerabilities
@@ -294,10 +313,11 @@ Export security findings to Git for audit trails and policy enforcement:
 ```bash
 # Export current state
 kubectl get alerts -n production -o yaml > production-alerts.yaml
+kubectl get clusteralerts -o yaml > cluster-alerts.yaml
 kubectl get imagevulnerabilities -o yaml > image-vulns.yaml
 
 # Commit to Git for tracking
-git add production-alerts.yaml image-vulns.yaml
+git add production-alerts.yaml cluster-alerts.yaml image-vulns.yaml
 git commit -m "Security snapshot $(date)"
 ```
 
@@ -358,7 +378,8 @@ kubectl get securityresults -A -o json \
 
 ### Individual CRDs (security.stackrox.io/v1alpha1)
 
-* **Alert** (namespaced): Policy violations and security alerts
+* **Alert** (namespaced): Namespace-scoped policy violations (e.g., deployment violations)
+* **ClusterAlert** (cluster-scoped): Cluster-scoped policy violations (e.g., cluster configuration issues)
 * **ImageVulnerability** (cluster-scoped): Container image vulnerabilities
 * **NodeVulnerability** (cluster-scoped): Kubernetes node vulnerabilities
 
