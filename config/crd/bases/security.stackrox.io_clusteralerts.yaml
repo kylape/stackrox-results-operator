@@ -15,19 +15,19 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.policyName
+    - jsonPath: .status.policyName
       name: Policy
       type: string
-    - jsonPath: .spec.policySeverity
+    - jsonPath: .status.policySeverity
       name: Severity
       type: string
     - jsonPath: .status.state
       name: State
       type: string
-    - jsonPath: .spec.lifecycleStage
+    - jsonPath: .status.lifecycleStage
       name: Lifecycle
       type: string
-    - jsonPath: .spec.time
+    - jsonPath: .status.time
       name: Age
       type: date
     name: v1alpha1
@@ -56,7 +56,19 @@ spec:
             type: object
           spec:
             description: spec defines the desired state of ClusterAlert
+            type: object
+          status:
+            description: status defines the observed state of ClusterAlert
             properties:
+              conditionMessage:
+                description: Current condition message
+                type: string
+              enforcementAction:
+                description: Enforcement action taken
+                type: string
+              enforcementCount:
+                description: Number of times enforcement was applied
+                type: integer
               entity:
                 description: Entity that violated the policy
                 properties:
@@ -122,6 +134,20 @@ spec:
                 - MEDIUM
                 - LOW
                 type: string
+              resolutionNote:
+                description: Note explaining resolution
+                type: string
+              resolvedAt:
+                description: When the alert was resolved
+                format: date-time
+                type: string
+              state:
+                description: Current state of the alert
+                enum:
+                - ACTIVE
+                - RESOLVED
+                - ATTEMPTED
+                type: string
               time:
                 description: When this alert occurred
                 format: date-time
@@ -154,39 +180,6 @@ spec:
                       type: string
                   type: object
                 type: array
-            required:
-            - lifecycleStage
-            - policyId
-            - policyName
-            - policySeverity
-            - time
-            type: object
-          status:
-            description: status defines the observed state of ClusterAlert
-            properties:
-              conditionMessage:
-                description: Current condition message
-                type: string
-              enforcementAction:
-                description: Enforcement action taken
-                type: string
-              enforcementCount:
-                description: Number of times enforcement was applied
-                type: integer
-              resolutionNote:
-                description: Note explaining resolution
-                type: string
-              resolvedAt:
-                description: When the alert was resolved
-                format: date-time
-                type: string
-              state:
-                description: Current state of the alert
-                enum:
-                - ACTIVE
-                - RESOLVED
-                - ATTEMPTED
-                type: string
             type: object
         required:
         - spec

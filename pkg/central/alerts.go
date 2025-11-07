@@ -211,7 +211,8 @@ func (c *Client) GetAlert(ctx context.Context, alertID string) (*Alert, error) {
 // ConvertToCRD converts a Central API alert to our Alert CRD format
 func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 	alert := &securityv1alpha1.Alert{
-		Spec: securityv1alpha1.AlertSpec{
+		Spec: securityv1alpha1.AlertSpec{},
+		Status: securityv1alpha1.AlertStatus{
 			PolicyID:       a.Policy.ID,
 			PolicyName:     a.Policy.Name,
 			PolicySeverity: normalizeAlertSeverity(a.Policy.Severity),
@@ -230,12 +231,12 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 
 	// Policy categories
 	if len(a.Policy.Categories) > 0 {
-		alert.Spec.PolicyCategories = a.Policy.Categories
+		alert.Status.PolicyCategories = a.Policy.Categories
 	}
 
 	// Policy description
 	if a.Policy.Description != "" {
-		alert.Spec.PolicyDescription = a.Policy.Description
+		alert.Status.PolicyDescription = a.Policy.Description
 	}
 
 	// Entity information
@@ -244,7 +245,7 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 	// We check both formats.
 	if a.Deployment != nil {
 		// List endpoint format
-		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
+		alert.Status.Entity = &securityv1alpha1.AlertEntity{
 			Type: "DEPLOYMENT",
 			Deployment: &securityv1alpha1.DeploymentInfo{
 				ID:          a.Deployment.ID,
@@ -256,12 +257,12 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 		}
 	} else if a.Entity != nil {
 		// Detail endpoint format
-		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
+		alert.Status.Entity = &securityv1alpha1.AlertEntity{
 			Type: a.Entity.Type,
 		}
 
 		if a.Entity.Deployment != nil {
-			alert.Spec.Entity.Deployment = &securityv1alpha1.DeploymentInfo{
+			alert.Status.Entity.Deployment = &securityv1alpha1.DeploymentInfo{
 				ID:          a.Entity.Deployment.ID,
 				Name:        a.Entity.Deployment.Name,
 				Namespace:   a.Entity.Deployment.Namespace,
@@ -271,14 +272,14 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 		}
 
 		if a.Entity.Image != nil {
-			alert.Spec.Entity.Image = &securityv1alpha1.ImageInfo{
+			alert.Status.Entity.Image = &securityv1alpha1.ImageInfo{
 				ID:   a.Entity.Image.ID,
 				Name: a.Entity.Image.Name,
 			}
 		}
 
 		if a.Entity.Resource != nil {
-			alert.Spec.Entity.Resource = &securityv1alpha1.ResourceInfo{
+			alert.Status.Entity.Resource = &securityv1alpha1.ResourceInfo{
 				Type: a.Entity.Resource.Type,
 				Name: a.Entity.Resource.Name,
 			}
@@ -287,7 +288,7 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 
 	// Violations
 	if len(a.Violations) > 0 {
-		alert.Spec.Violations = make([]securityv1alpha1.Violation, len(a.Violations))
+		alert.Status.Violations = make([]securityv1alpha1.Violation, len(a.Violations))
 		for i, v := range a.Violations {
 			violation := securityv1alpha1.Violation{
 				Message: v.Message,
@@ -304,22 +305,22 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 				}
 			}
 
-			alert.Spec.Violations[i] = violation
+			alert.Status.Violations[i] = violation
 		}
 	}
 
 	// Timestamps
 	if timeVal, err := parseTime(a.Time); err == nil {
-		alert.Spec.Time = *timeVal
+		alert.Status.Time = timeVal
 	}
 
 	if a.FirstOccurred != "" {
 		if timeVal, err := parseTime(a.FirstOccurred); err == nil {
-			alert.Spec.FirstOccurred = timeVal
+			alert.Status.FirstOccurred = timeVal
 		}
 	}
 
-	// Status
+	// State and enforcement
 	if a.State != "" {
 		alert.Status.State = a.State
 		alert.Labels["stackrox.io/state"] = a.State
@@ -346,7 +347,8 @@ func (a *Alert) ConvertToCRD() *securityv1alpha1.Alert {
 // This is used for cluster-scoped alerts (alerts without a namespace)
 func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 	alert := &securityv1alpha1.ClusterAlert{
-		Spec: securityv1alpha1.ClusterAlertSpec{
+		Spec: securityv1alpha1.ClusterAlertSpec{},
+		Status: securityv1alpha1.ClusterAlertStatus{
 			PolicyID:       a.Policy.ID,
 			PolicyName:     a.Policy.Name,
 			PolicySeverity: normalizeAlertSeverity(a.Policy.Severity),
@@ -365,12 +367,12 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 
 	// Policy categories
 	if len(a.Policy.Categories) > 0 {
-		alert.Spec.PolicyCategories = a.Policy.Categories
+		alert.Status.PolicyCategories = a.Policy.Categories
 	}
 
 	// Policy description
 	if a.Policy.Description != "" {
-		alert.Spec.PolicyDescription = a.Policy.Description
+		alert.Status.PolicyDescription = a.Policy.Description
 	}
 
 	// Entity information
@@ -379,7 +381,7 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 	// We check both formats.
 	if a.Deployment != nil {
 		// List endpoint format
-		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
+		alert.Status.Entity = &securityv1alpha1.AlertEntity{
 			Type: "DEPLOYMENT",
 			Deployment: &securityv1alpha1.DeploymentInfo{
 				ID:          a.Deployment.ID,
@@ -391,12 +393,12 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 		}
 	} else if a.Entity != nil {
 		// Detail endpoint format
-		alert.Spec.Entity = &securityv1alpha1.AlertEntity{
+		alert.Status.Entity = &securityv1alpha1.AlertEntity{
 			Type: a.Entity.Type,
 		}
 
 		if a.Entity.Deployment != nil {
-			alert.Spec.Entity.Deployment = &securityv1alpha1.DeploymentInfo{
+			alert.Status.Entity.Deployment = &securityv1alpha1.DeploymentInfo{
 				ID:          a.Entity.Deployment.ID,
 				Name:        a.Entity.Deployment.Name,
 				Namespace:   a.Entity.Deployment.Namespace,
@@ -406,14 +408,14 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 		}
 
 		if a.Entity.Image != nil {
-			alert.Spec.Entity.Image = &securityv1alpha1.ImageInfo{
+			alert.Status.Entity.Image = &securityv1alpha1.ImageInfo{
 				ID:   a.Entity.Image.ID,
 				Name: a.Entity.Image.Name,
 			}
 		}
 
 		if a.Entity.Resource != nil {
-			alert.Spec.Entity.Resource = &securityv1alpha1.ResourceInfo{
+			alert.Status.Entity.Resource = &securityv1alpha1.ResourceInfo{
 				Type: a.Entity.Resource.Type,
 				Name: a.Entity.Resource.Name,
 			}
@@ -422,7 +424,7 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 
 	// Violations
 	if len(a.Violations) > 0 {
-		alert.Spec.Violations = make([]securityv1alpha1.Violation, len(a.Violations))
+		alert.Status.Violations = make([]securityv1alpha1.Violation, len(a.Violations))
 		for i, v := range a.Violations {
 			violation := securityv1alpha1.Violation{
 				Message: v.Message,
@@ -439,22 +441,22 @@ func (a *Alert) ConvertToClusterCRD() *securityv1alpha1.ClusterAlert {
 				}
 			}
 
-			alert.Spec.Violations[i] = violation
+			alert.Status.Violations[i] = violation
 		}
 	}
 
 	// Timestamps
 	if timeVal, err := parseTime(a.Time); err == nil {
-		alert.Spec.Time = *timeVal
+		alert.Status.Time = timeVal
 	}
 
 	if a.FirstOccurred != "" {
 		if timeVal, err := parseTime(a.FirstOccurred); err == nil {
-			alert.Spec.FirstOccurred = timeVal
+			alert.Status.FirstOccurred = timeVal
 		}
 	}
 
-	// Status
+	// State and enforcement
 	if a.State != "" {
 		alert.Status.State = a.State
 		alert.Labels["stackrox.io/state"] = a.State

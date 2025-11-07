@@ -15,25 +15,25 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.image.name
+    - jsonPath: .status.image.name
       name: Image
       type: string
-    - jsonPath: .spec.image.tag
+    - jsonPath: .status.image.tag
       name: Tag
       type: string
-    - jsonPath: .spec.summary.critical.total
+    - jsonPath: .status.summary.critical.total
       name: Critical
       type: integer
-    - jsonPath: .spec.summary.high.total
+    - jsonPath: .status.summary.high.total
       name: High
       type: integer
-    - jsonPath: .spec.summary.total
+    - jsonPath: .status.summary.total
       name: Total
       type: integer
-    - jsonPath: .spec.summary.fixableTotal
+    - jsonPath: .status.summary.fixableTotal
       name: Fixable
       type: integer
-    - jsonPath: .spec.scanTime
+    - jsonPath: .status.scanTime
       name: Scanned
       type: date
     name: v1alpha1
@@ -60,7 +60,15 @@ spec:
           metadata:
             type: object
           spec:
-            description: ImageVulnerabilitySpec defines the desired state of ImageVulnerability
+            description: |-
+              ImageVulnerabilitySpec defines the desired state of ImageVulnerability
+              NOTE: This is a read-only resource created by the operator.
+              Spec is intentionally empty - all data is in Status.
+            type: object
+          status:
+            description: |-
+              ImageVulnerabilityStatus defines the observed state of ImageVulnerability
+              This contains all the vulnerability scan data from StackRox Central
             properties:
               cves:
                 description: Top CVEs (limited to prevent resource bloat)
@@ -230,13 +238,6 @@ spec:
                 - fixableTotal
                 - total
                 type: object
-            required:
-            - image
-            - scanTime
-            - summary
-            type: object
-          status:
-            description: ImageVulnerabilityStatus defines the observed state of ImageVulnerability
             type: object
         type: object
     served: true

@@ -24,44 +24,10 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // AlertSpec defines the desired state of Alert
+// NOTE: This is a read-only resource created by the operator.
+// Spec is intentionally empty - all data is in Status.
 type AlertSpec struct {
-	// Policy information
-	// +kubebuilder:validation:Required
-	PolicyID string `json:"policyId"`
-
-	// +kubebuilder:validation:Required
-	PolicyName string `json:"policyName"`
-
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CRITICAL;HIGH;MEDIUM;LOW
-	PolicySeverity string `json:"policySeverity"`
-
-	// +optional
-	PolicyDescription string `json:"policyDescription,omitempty"`
-
-	// +optional
-	PolicyCategories []string `json:"policyCategories,omitempty"`
-
-	// Lifecycle stage when the violation was detected
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=DEPLOY;RUNTIME
-	LifecycleStage string `json:"lifecycleStage"`
-
-	// Entity that violated the policy
-	// +optional
-	Entity *AlertEntity `json:"entity,omitempty"`
-
-	// Violation details
-	// +optional
-	Violations []Violation `json:"violations,omitempty"`
-
-	// When this alert occurred
-	// +kubebuilder:validation:Required
-	Time metav1.Time `json:"time"`
-
-	// When this alert was first triggered
-	// +optional
-	FirstOccurred *metav1.Time `json:"firstOccurred,omitempty"`
+	// This resource is managed by the operator and has no user-configurable spec.
 }
 
 // AlertEntity describes the Kubernetes entity that violated the policy
@@ -144,7 +110,46 @@ type KeyValueAttr struct {
 }
 
 // AlertStatus defines the observed state of Alert
+// This contains all the security finding data from StackRox Central
 type AlertStatus struct {
+	// Policy information
+	// +optional
+	PolicyID string `json:"policyId,omitempty"`
+
+	// +optional
+	PolicyName string `json:"policyName,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:Enum=CRITICAL;HIGH;MEDIUM;LOW
+	PolicySeverity string `json:"policySeverity,omitempty"`
+
+	// +optional
+	PolicyDescription string `json:"policyDescription,omitempty"`
+
+	// +optional
+	PolicyCategories []string `json:"policyCategories,omitempty"`
+
+	// Lifecycle stage when the violation was detected
+	// +optional
+	// +kubebuilder:validation:Enum=DEPLOY;RUNTIME
+	LifecycleStage string `json:"lifecycleStage,omitempty"`
+
+	// Entity that violated the policy
+	// +optional
+	Entity *AlertEntity `json:"entity,omitempty"`
+
+	// Violation details
+	// +optional
+	Violations []Violation `json:"violations,omitempty"`
+
+	// When this alert occurred
+	// +optional
+	Time *metav1.Time `json:"time,omitempty"`
+
+	// When this alert was first triggered
+	// +optional
+	FirstOccurred *metav1.Time `json:"firstOccurred,omitempty"`
+
 	// Current state of the alert
 	// +kubebuilder:validation:Enum=ACTIVE;RESOLVED;ATTEMPTED
 	// +optional
@@ -174,11 +179,11 @@ type AlertStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=alerts,scope=Namespaced
-// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.policyName`
-// +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.spec.policySeverity`
+// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.policyName`
+// +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.status.policySeverity`
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
-// +kubebuilder:printcolumn:name="Lifecycle",type=string,JSONPath=`.spec.lifecycleStage`
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.spec.time`
+// +kubebuilder:printcolumn:name="Lifecycle",type=string,JSONPath=`.status.lifecycleStage`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.status.time`
 
 // Alert is the Schema for the alerts API
 type Alert struct {

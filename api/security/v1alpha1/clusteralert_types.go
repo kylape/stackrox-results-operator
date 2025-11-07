@@ -21,18 +21,26 @@ import (
 )
 
 // ClusterAlertSpec defines the desired state of ClusterAlert
+// NOTE: This is a read-only resource created by the operator.
+// Spec is intentionally empty - all data is in Status.
 // ClusterAlert is for cluster-scoped policy violations (alerts without a namespace)
 type ClusterAlertSpec struct {
+	// This resource is managed by the operator and has no user-configurable spec.
+}
+
+// ClusterAlertStatus defines the observed state of ClusterAlert
+// This contains all the security finding data from StackRox Central
+type ClusterAlertStatus struct {
 	// Policy information
-	// +kubebuilder:validation:Required
-	PolicyID string `json:"policyId"`
+	// +optional
+	PolicyID string `json:"policyId,omitempty"`
 
-	// +kubebuilder:validation:Required
-	PolicyName string `json:"policyName"`
+	// +optional
+	PolicyName string `json:"policyName,omitempty"`
 
-	// +kubebuilder:validation:Required
+	// +optional
 	// +kubebuilder:validation:Enum=CRITICAL;HIGH;MEDIUM;LOW
-	PolicySeverity string `json:"policySeverity"`
+	PolicySeverity string `json:"policySeverity,omitempty"`
 
 	// +optional
 	PolicyDescription string `json:"policyDescription,omitempty"`
@@ -41,9 +49,9 @@ type ClusterAlertSpec struct {
 	PolicyCategories []string `json:"policyCategories,omitempty"`
 
 	// Lifecycle stage when the violation was detected
-	// +kubebuilder:validation:Required
+	// +optional
 	// +kubebuilder:validation:Enum=DEPLOY;RUNTIME
-	LifecycleStage string `json:"lifecycleStage"`
+	LifecycleStage string `json:"lifecycleStage,omitempty"`
 
 	// Entity that violated the policy
 	// +optional
@@ -54,16 +62,13 @@ type ClusterAlertSpec struct {
 	Violations []Violation `json:"violations,omitempty"`
 
 	// When this alert occurred
-	// +kubebuilder:validation:Required
-	Time metav1.Time `json:"time"`
+	// +optional
+	Time *metav1.Time `json:"time,omitempty"`
 
 	// When this alert was first triggered
 	// +optional
 	FirstOccurred *metav1.Time `json:"firstOccurred,omitempty"`
-}
 
-// ClusterAlertStatus defines the observed state of ClusterAlert
-type ClusterAlertStatus struct {
 	// Current state of the alert
 	// +kubebuilder:validation:Enum=ACTIVE;RESOLVED;ATTEMPTED
 	// +optional
@@ -93,11 +98,11 @@ type ClusterAlertStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=clusteralerts,scope=Cluster
-// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.policyName`
-// +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.spec.policySeverity`
+// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.policyName`
+// +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.status.policySeverity`
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
-// +kubebuilder:printcolumn:name="Lifecycle",type=string,JSONPath=`.spec.lifecycleStage`
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.spec.time`
+// +kubebuilder:printcolumn:name="Lifecycle",type=string,JSONPath=`.status.lifecycleStage`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.status.time`
 
 // ClusterAlert is the Schema for the clusteralerts API
 // ClusterAlert represents cluster-scoped policy violations (alerts without a namespace)

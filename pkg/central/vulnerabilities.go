@@ -386,12 +386,13 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 // ConvertToCRD converts an ImageScan to ImageVulnerability CRD
 func (img *ImageScan) ConvertToCRD() *securityv1alpha1.ImageVulnerability {
 	vuln := &securityv1alpha1.ImageVulnerability{
-		Spec: securityv1alpha1.ImageVulnerabilitySpec{},
+		Spec:   securityv1alpha1.ImageVulnerabilitySpec{},
+		Status: securityv1alpha1.ImageVulnerabilityStatus{},
 	}
 
 	// Image reference
 	if img.Image != nil && img.Image.Name != nil {
-		vuln.Spec.Image = securityv1alpha1.ImageReference{
+		imageRef := securityv1alpha1.ImageReference{
 			Name:     extractImageName(img.Image.Name.FullName),
 			FullName: img.Image.Name.FullName,
 			Registry: img.Image.Name.Registry,
@@ -400,50 +401,57 @@ func (img *ImageScan) ConvertToCRD() *securityv1alpha1.ImageVulnerability {
 		}
 
 		if img.Image.Metadata != nil && img.Image.Metadata.V1 != nil {
-			vuln.Spec.Image.SHA = img.Image.Metadata.V1.Digest
+			imageRef.SHA = img.Image.Metadata.V1.Digest
 		}
 
+		vuln.Status.Image = &imageRef
+
 		// Generate name from image
-		vuln.Name = generateImageVulnName(img.Image.Name.FullName, vuln.Spec.Image.SHA)
+		vuln.Name = generateImageVulnName(img.Image.Name.FullName, imageRef.SHA)
 	}
 
 	// Scan time
 	if timeVal, err := parseTime(img.ScanTime); err == nil {
-		vuln.Spec.ScanTime = *timeVal
+		vuln.Status.ScanTime = timeVal
 	}
 
 	// Summary
 	if img.Summary != nil {
-		vuln.Spec.Summary = convertVulnSummary(img.Summary)
+		summary := convertVulnSummary(img.Summary)
+		vuln.Status.Summary = &summary
 	}
 
 	// CVEs
 	if len(img.CVEs) > 0 {
-		vuln.Spec.CVEs = make([]securityv1alpha1.CVE, len(img.CVEs))
+		vuln.Status.CVEs = make([]securityv1alpha1.CVE, len(img.CVEs))
 		for i, cve := range img.CVEs {
-			vuln.Spec.CVEs[i] = convertCVE(cve)
+			vuln.Status.CVEs[i] = convertCVE(cve)
 		}
 	}
 
 	// Labels
-	vuln.Labels = map[string]string{
-		"stackrox.io/image-name": sanitizeLabelValue(vuln.Spec.Image.Name),
-	}
+	if vuln.Status.Image != nil {
+		vuln.Labels = map[string]string{
+			"stackrox.io/image-name": sanitizeLabelValue(vuln.Status.Image.Name),
+		}
 
-	if vuln.Spec.Image.Tag != "" {
-		vuln.Labels["stackrox.io/image-tag"] = sanitizeLabelValue(vuln.Spec.Image.Tag)
-	}
+		if vuln.Status.Image.Tag != "" {
+			vuln.Labels["stackrox.io/image-tag"] = sanitizeLabelValue(vuln.Status.Image.Tag)
+		}
 
-	if vuln.Spec.Image.Registry != "" {
-		vuln.Labels["stackrox.io/registry"] = sanitizeLabelValue(vuln.Spec.Image.Registry)
+		if vuln.Status.Image.Registry != "" {
+			vuln.Labels["stackrox.io/registry"] = sanitizeLabelValue(vuln.Status.Image.Registry)
+		}
 	}
 
 	// Add severity labels
-	if vuln.Spec.Summary.Critical.Total > 0 {
-		vuln.Labels["stackrox.io/has-critical"] = "true"
-	}
-	if vuln.Spec.Summary.FixableTotal > 0 {
-		vuln.Labels["stackrox.io/has-fixable"] = "true"
+	if vuln.Status.Summary != nil {
+		if vuln.Status.Summary.Critical != nil && vuln.Status.Summary.Critical.Total > 0 {
+			vuln.Labels["stackrox.io/has-critical"] = "true"
+		}
+		if vuln.Status.Summary.FixableTotal > 0 {
+			vuln.Labels["stackrox.io/has-fixable"] = "true"
+		}
 	}
 
 	return vuln
@@ -452,7 +460,8 @@ func (img *ImageScan) ConvertToCRD() *securityv1alpha1.ImageVulnerability {
 // ConvertToCRD converts a NodeScan to NodeVulnerability CRD
 func (node *NodeScan) ConvertToCRD() *securityv1alpha1.NodeVulnerability {
 	vuln := &securityv1alpha1.NodeVulnerability{
-		Spec: securityv1alpha1.NodeVulnerabilitySpec{
+		Spec: securityv1alpha1.NodeVulnerabilitySpec{},
+		Status: securityv1alpha1.NodeVulnerabilityStatus{
 			NodeName:      node.NodeName,
 			OSImage:       node.OSImage,
 			KernelVersion: node.KernelVersion,
@@ -464,19 +473,20 @@ func (node *NodeScan) ConvertToCRD() *securityv1alpha1.NodeVulnerability {
 
 	// Scan time
 	if timeVal, err := parseTime(node.ScanTime); err == nil {
-		vuln.Spec.ScanTime = *timeVal
+		vuln.Status.ScanTime = timeVal
 	}
 
 	// Summary
 	if node.Summary != nil {
-		vuln.Spec.Summary = convertVulnSummary(node.Summary)
+		summary := convertVulnSummary(node.Summary)
+		vuln.Status.Summary = &summary
 	}
 
 	// CVEs
 	if len(node.CVEs) > 0 {
-		vuln.Spec.CVEs = make([]securityv1alpha1.CVE, len(node.CVEs))
+		vuln.Status.CVEs = make([]securityv1alpha1.CVE, len(node.CVEs))
 		for i, cve := range node.CVEs {
-			vuln.Spec.CVEs[i] = convertCVE(cve)
+			vuln.Status.CVEs[i] = convertCVE(cve)
 		}
 	}
 
@@ -485,7 +495,7 @@ func (node *NodeScan) ConvertToCRD() *securityv1alpha1.NodeVulnerability {
 		"stackrox.io/node-name": sanitizeLabelValue(node.NodeName),
 	}
 
-	if vuln.Spec.Summary.Critical.Total > 0 {
+	if vuln.Status.Summary != nil && vuln.Status.Summary.Critical != nil && vuln.Status.Summary.Critical.Total > 0 {
 		vuln.Labels["stackrox.io/has-critical"] = "true"
 	}
 
