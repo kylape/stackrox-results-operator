@@ -563,8 +563,5 @@ func (r *ResultsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&resultsv1alpha1.ResultsExporter{}).
 		Named("resultsexporter").
-		WithOptions(ctrl.Options{
-			MaxConcurrentReconciles: 1, // Prevent concurrent reconciliations
-		}).
 		Complete(r)
 }

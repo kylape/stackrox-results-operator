@@ -32,6 +32,15 @@ This keeps the workflow generic and works with any infrastructure setup.
 
 ## Build-Deploy-Test Loop
 
+### Current Environment Setup
+
+This session uses a kind cluster with a local Docker registry at `localhost:5001`:
+
+```bash
+export IMG_REGISTRY="localhost:5001/stackrox"
+export VERSION=v16  # Increment for each build
+```
+
 ### 1. Make Code Changes
 
 Edit files in:
@@ -42,27 +51,36 @@ Edit files in:
 ### 2. Build the Operator Image
 
 ```bash
-# Increment version number (e.g., v10 -> v11) or use timestamp
-export VERSION=v11  # or VERSION=v$(date +%s) for auto-versioning
-make docker-build IMG=${IMG_REGISTRY}/stackrox-results-operator:${VERSION}
+# Increment version number (e.g., v16 -> v17)
+export VERSION=v17
+make docker-build IMG=${IMG_REGISTRY}/results-operator:${VERSION}
 ```
 
-This uses podman to build the multi-stage Dockerfile.
+This uses docker/podman to build the multi-stage Dockerfile:
+- Stage 1: `golang:1.24` builder (builds Go binary)
+- Stage 2: `registry.access.redhat.com/ubi9/ubi-micro:latest` (minimal runtime)
 
-### 3. Push or Load Image
+### 3. Push Image to Registry
+
+**For localhost:5001 registry (current setup):**
+
+```bash
+# Push with TLS verification disabled (local HTTP registry)
+docker push ${IMG_REGISTRY}/results-operator:${VERSION} --tls-verify=false
+```
 
 **For remote clusters (OpenShift, etc.):**
 
 ```bash
 # Push to registry (ensure you're authenticated first)
-podman push ${IMG_REGISTRY}/stackrox-results-operator:${VERSION}
+podman push ${IMG_REGISTRY}/results-operator:${VERSION}
 ```
 
-**For local kind clusters:**
+**For kind clusters with `kind load`:**
 
 ```bash
 # Load directly into kind cluster (no push needed)
-kind load docker-image ${IMG_REGISTRY}/stackrox-results-operator:${VERSION} --name ${KIND_CLUSTER}
+kind load docker-image ${IMG_REGISTRY}/results-operator:${VERSION} --name ${KIND_CLUSTER}
 ```
 
 ### 4. Update the Deployment
@@ -70,7 +88,7 @@ kind load docker-image ${IMG_REGISTRY}/stackrox-results-operator:${VERSION} --na
 ```bash
 # Update the operator deployment to use new image
 kubectl set image deployment/stackrox-results-operator-controller-manager \
-  manager=${IMG_REGISTRY}/stackrox-results-operator:${VERSION} \
+  manager=${IMG_REGISTRY}/results-operator:${VERSION} \
   -n stackrox-results-operator-system
 
 # Wait for rollout to complete
