@@ -169,26 +169,25 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Calculate next sync interval with exponential backoff on failures
-	syncInterval := defaultSyncInterval
-	if exporter.Spec.SyncInterval != nil {
-		syncInterval = exporter.Spec.SyncInterval.Duration
-	}
+	var syncInterval time.Duration
 
-	// Apply exponential backoff if there are consecutive failures
 	if syncErr != nil && exporter.Status.ConsecutiveFailures > 0 {
-		// Exponential backoff: base interval * 2^(failures-1), capped at 1 hour
-		backoffMultiplier := 1 << (exporter.Status.ConsecutiveFailures - 1) // 2^(n-1)
-		if backoffMultiplier > 12 {                                          // Cap at 2^12 = 4096x
-			backoffMultiplier = 12 // Max 1 hour with 5min base
+		// Exponential backoff on failures: 1s, 2s, 4s, 8s, 16s, ... up to 1 hour
+		// Formula: 2^(failures-1) seconds, capped at 3600 seconds (1 hour)
+		backoffSeconds := 1 << (exporter.Status.ConsecutiveFailures - 1) // 2^(n-1)
+		if backoffSeconds > 3600 {                                        // Cap at 1 hour
+			backoffSeconds = 3600
 		}
-		syncInterval = syncInterval * time.Duration(backoffMultiplier)
-		if syncInterval > 1*time.Hour {
-			syncInterval = 1 * time.Hour
-		}
+		syncInterval = time.Duration(backoffSeconds) * time.Second
 		logger.Info("Applying exponential backoff due to failures",
 			"consecutiveFailures", exporter.Status.ConsecutiveFailures,
 			"interval", syncInterval)
 	} else {
+		// Normal sync interval when no failures
+		syncInterval = defaultSyncInterval
+		if exporter.Spec.SyncInterval != nil {
+			syncInterval = exporter.Spec.SyncInterval.Duration
+		}
 		logger.Info("Requeuing for next sync", "interval", syncInterval)
 	}
 
