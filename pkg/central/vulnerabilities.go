@@ -329,58 +329,102 @@ func calculateVulnSummary(cves []*CVE) *VulnSummary {
 func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string, maxCVEsPerNode int) ([]*NodeScan, error) {
 	log.V(1).Info("Listing node vulnerabilities from Central")
 
-	// Build query
-	query := url.Values{}
-
-	if minSeverity != "" {
-		severityLevels := getSeverityLevelsAbove(minSeverity)
-		filters := []string{}
-		for _, sev := range severityLevels {
-			filters = append(filters, fmt.Sprintf("CVE Severity:%s", sev))
-		}
-		query.Set("query", strings.Join(filters, "+"))
-	}
-
-	path := "/v1/nodes"
-	if len(query) > 0 {
-		path += "?" + query.Encode()
-	}
-
-	resp, err := c.doRequest(ctx, "GET", path)
+	// First, get all clusters
+	resp, err := c.doRequest(ctx, "GET", "/v1/clusters")
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list nodes")
+		return nil, errors.Wrap(err, "failed to list clusters")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, errors.Errorf("list nodes failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, errors.Errorf("list clusters failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to read response body")
+		return nil, errors.Wrap(err, "failed to read clusters response body")
 	}
 
-	var response struct {
-		Nodes []*NodeScan `json:"nodes"`
+	var clustersResponse struct {
+		Clusters []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"clusters"`
 	}
 
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, errors.Wrap(err, "failed to parse nodes response")
+	if err := json.Unmarshal(body, &clustersResponse); err != nil {
+		return nil, errors.Wrap(err, "failed to parse clusters response")
+	}
+
+	// Collect all nodes from all clusters
+	var allNodes []*NodeScan
+
+	for _, cluster := range clustersResponse.Clusters {
+		log.V(1).Info("Fetching nodes for cluster", "clusterID", cluster.ID, "clusterName", cluster.Name)
+
+		// Build path with cluster ID
+		path := fmt.Sprintf("/v1/nodes/%s", cluster.ID)
+
+		// Build query for filtering
+		query := url.Values{}
+		if minSeverity != "" {
+			severityLevels := getSeverityLevelsAbove(minSeverity)
+			filters := []string{}
+			for _, sev := range severityLevels {
+				filters = append(filters, fmt.Sprintf("CVE Severity:%s", sev))
+			}
+			query.Set("query", strings.Join(filters, "+"))
+		}
+
+		if len(query) > 0 {
+			path += "?" + query.Encode()
+		}
+
+		resp, err := c.doRequest(ctx, "GET", path)
+		if err != nil {
+			log.Error(err, "Failed to list nodes for cluster", "clusterID", cluster.ID)
+			continue // Skip this cluster on error
+		}
+
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			log.Error(errors.New("non-200 status"), "List nodes failed for cluster",
+				"clusterID", cluster.ID, "status", resp.StatusCode, "body", string(body))
+			resp.Body.Close()
+			continue // Skip this cluster on error
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			log.Error(err, "Failed to read nodes response body for cluster", "clusterID", cluster.ID)
+			continue // Skip this cluster on error
+		}
+
+		var nodesResponse struct {
+			Nodes []*NodeScan `json:"nodes"`
+		}
+
+		if err := json.Unmarshal(body, &nodesResponse); err != nil {
+			log.Error(err, "Failed to parse nodes response for cluster", "clusterID", cluster.ID)
+			continue // Skip this cluster on error
+		}
+
+		allNodes = append(allNodes, nodesResponse.Nodes...)
 	}
 
 	// Limit CVEs per node if requested
 	if maxCVEsPerNode > 0 {
-		for _, node := range response.Nodes {
+		for _, node := range allNodes {
 			if len(node.CVEs) > maxCVEsPerNode {
 				node.CVEs = node.CVEs[:maxCVEsPerNode]
 			}
 		}
 	}
 
-	log.Info("Retrieved node vulnerabilities from Central", "count", len(response.Nodes))
-	return response.Nodes, nil
+	log.Info("Retrieved node vulnerabilities from Central", "count", len(allNodes))
+	return allNodes, nil
 }
 
 // ConvertToCRD converts an ImageScan to ImageVulnerability CRD

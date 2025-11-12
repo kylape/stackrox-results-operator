@@ -21,26 +21,26 @@ import (
 // while the detail endpoint (/v1/alerts/{id}) returns them in an "entity" field.
 // We support both formats.
 type Alert struct {
-	ID                string       `json:"id"`
-	Policy            *Policy      `json:"policy"`
-	LifecycleStage    string       `json:"lifecycleStage"`
+	ID             string  `json:"id"`
+	Policy         *Policy `json:"policy"`
+	LifecycleStage string  `json:"lifecycleStage"`
 
 	// Fields from list endpoint (/v1/alerts)
-	Deployment       *DeploymentInfo    `json:"deployment,omitempty"`
-	Namespace        string             `json:"namespace,omitempty"`
-	CommonEntityInfo *CommonEntityInfo  `json:"commonEntityInfo,omitempty"`
+	Deployment       *DeploymentInfo   `json:"deployment,omitempty"`
+	Namespace        string            `json:"namespace,omitempty"`
+	CommonEntityInfo *CommonEntityInfo `json:"commonEntityInfo,omitempty"`
 
 	// Fields from detail endpoint (/v1/alerts/{id})
-	Entity            *AlertEntity `json:"entity,omitempty"`
-	Violations        []*Violation `json:"violations,omitempty"`
+	Entity     *AlertEntity `json:"entity,omitempty"`
+	Violations []*Violation `json:"violations,omitempty"`
 
 	// Common fields
-	Time              string       `json:"time"`
-	FirstOccurred     string       `json:"firstOccurred,omitempty"`
-	State             string       `json:"state,omitempty"`
-	ResolvedAt        string       `json:"resolvedAt,omitempty"`
-	EnforcementAction string       `json:"enforcementAction,omitempty"`
-	EnforcementCount  int          `json:"enforcementCount,omitempty"`
+	Time              string `json:"time"`
+	FirstOccurred     string `json:"firstOccurred,omitempty"`
+	State             string `json:"state,omitempty"`
+	ResolvedAt        string `json:"resolvedAt,omitempty"`
+	EnforcementAction string `json:"enforcementAction,omitempty"`
+	EnforcementCount  int    `json:"enforcementCount,omitempty"`
 }
 
 type Policy struct {

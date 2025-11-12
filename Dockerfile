@@ -21,11 +21,23 @@ COPY . .
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager ./cmd/main.go
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+# Use Red Hat UBI Micro as minimal base image to package the manager binary
+# UBI Micro is the Red Hat equivalent to distroless - minimal, secure, and supportable
+# Refer to https://www.redhat.com/en/blog/introduction-ubi-micro for more details
+FROM registry.access.redhat.com/ubi9/ubi-micro:latest
+
+# OpenShift runs containers with arbitrary UIDs, so we need to:
+# 1. Set ownership to root group (GID 0)
+# 2. Grant group permissions for any directories that need to be written to
+# 3. Use a non-root user, but don't hardcode the UID
 WORKDIR /
-COPY --from=builder /workspace/manager .
-USER 65532:65532
+COPY --from=builder --chown=1001:0 /workspace/manager .
+
+# Make the binary executable by the root group (required for OpenShift)
+RUN chmod g+x /manager
+
+# Use a non-root user by default (UID 1001)
+# OpenShift will override this with a random UID in the same group (GID 0)
+USER 1001
 
 ENTRYPOINT ["/manager"]

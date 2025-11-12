@@ -19,6 +19,7 @@ spec:
     # Secret containing auth credentials (required)
     # See central-auth-secret.yaml for example
     authSecretName: central-auth
+    authSecretNamespace: stackrox
 
     # TLS configuration
     tlsConfig:

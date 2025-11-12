@@ -168,13 +168,30 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	// Calculate next sync interval
+	// Calculate next sync interval with exponential backoff on failures
 	syncInterval := defaultSyncInterval
 	if exporter.Spec.SyncInterval != nil {
 		syncInterval = exporter.Spec.SyncInterval.Duration
 	}
 
-	logger.Info("Requeuing for next sync", "interval", syncInterval)
+	// Apply exponential backoff if there are consecutive failures
+	if syncErr != nil && exporter.Status.ConsecutiveFailures > 0 {
+		// Exponential backoff: base interval * 2^(failures-1), capped at 1 hour
+		backoffMultiplier := 1 << (exporter.Status.ConsecutiveFailures - 1) // 2^(n-1)
+		if backoffMultiplier > 12 {                                          // Cap at 2^12 = 4096x
+			backoffMultiplier = 12 // Max 1 hour with 5min base
+		}
+		syncInterval = syncInterval * time.Duration(backoffMultiplier)
+		if syncInterval > 1*time.Hour {
+			syncInterval = 1 * time.Hour
+		}
+		logger.Info("Applying exponential backoff due to failures",
+			"consecutiveFailures", exporter.Status.ConsecutiveFailures,
+			"interval", syncInterval)
+	} else {
+		logger.Info("Requeuing for next sync", "interval", syncInterval)
+	}
+
 	return ctrl.Result{RequeueAfter: syncInterval}, nil
 }
 
@@ -546,5 +563,8 @@ func (r *ResultsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&resultsv1alpha1.ResultsExporter{}).
 		Named("resultsexporter").
+		WithOptions(ctrl.Options{
+			MaxConcurrentReconciles: 1, // Prevent concurrent reconciliations
+		}).
 		Complete(r)
 }
