@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/stackrox/rox/generated/storage"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -306,7 +307,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	logger.Info("Syncing SecurityResults")
 
 	// Fetch alerts from Central
-	var alerts []*central.Alert
+	var alerts []*storage.ListAlert
 	if exporter.Spec.Exports.Alerts != nil && exporter.Spec.Exports.Alerts.Enabled {
 		config := exporter.Spec.Exports.Alerts
 		opts := central.ListAlertsOptions{
@@ -348,7 +349,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	}
 
 	// Group data by namespace
-	namespaceData := make(map[string]*resultsv1alpha1.SecurityResultsSpec)
+	namespaceData := make(map[string]*securityv1alpha1.SecurityResultsSpec)
 
 	// Group alerts by namespace
 	for _, alert := range alerts {
@@ -359,7 +360,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		}
 
 		if namespaceData[namespace] == nil {
-			namespaceData[namespace] = &resultsv1alpha1.SecurityResultsSpec{
+			namespaceData[namespace] = &securityv1alpha1.SecurityResultsSpec{
 				Namespace: namespace,
 			}
 		}
@@ -388,7 +389,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	// Create/update SecurityResults CR for each namespace
 	now := metav1.Now()
 	for namespace, spec := range namespaceData {
-		sr := &resultsv1alpha1.SecurityResults{
+		sr := &securityv1alpha1.SecurityResults{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "security-results",
 				Namespace: namespace,
@@ -398,13 +399,13 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 
 		// Calculate summary
 		summary := r.calculateSecurityResultsSummary(spec)
-		sr.Status = resultsv1alpha1.SecurityResultsStatus{
+		sr.Status = securityv1alpha1.SecurityResultsStatus{
 			Summary:     summary,
 			LastUpdated: &now,
 		}
 
 		// Create or update
-		existing := &resultsv1alpha1.SecurityResults{}
+		existing := &securityv1alpha1.SecurityResults{}
 		err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "security-results"}, existing)
 
 		if apierrors.IsNotFound(err) {
@@ -474,7 +475,7 @@ func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Conte
 	}
 
 	// Convert nodes to NodeVulnerabilityData
-	nodeData := make([]resultsv1alpha1.NodeVulnerabilityData, 0, len(nodes))
+	nodeData := make([]securityv1alpha1.NodeVulnerabilityData, 0, len(nodes))
 	for _, node := range nodes {
 		nodeData = append(nodeData, r.convertNodeToNodeVulnData(node))
 		counts.NodeVulnerabilities++
@@ -482,24 +483,24 @@ func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Conte
 
 	// Create/update ClusterSecurityResults
 	now := metav1.Now()
-	csr := &resultsv1alpha1.ClusterSecurityResults{
+	csr := &securityv1alpha1.ClusterSecurityResults{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "cluster-security-results",
 		},
-		Spec: resultsv1alpha1.ClusterSecurityResultsSpec{
+		Spec: securityv1alpha1.ClusterSecurityResultsSpec{
 			NodeVulnerabilities: nodeData,
 		},
 	}
 
 	// Calculate summary
 	summary := r.calculateClusterSecurityResultsSummary(&csr.Spec)
-	csr.Status = resultsv1alpha1.ClusterSecurityResultsStatus{
+	csr.Status = securityv1alpha1.ClusterSecurityResultsStatus{
 		Summary:     summary,
 		LastUpdated: &now,
 	}
 
 	// Create or update
-	existing := &resultsv1alpha1.ClusterSecurityResults{}
+	existing := &securityv1alpha1.ClusterSecurityResults{}
 	err := r.Get(ctx, client.ObjectKey{Name: "cluster-security-results"}, existing)
 
 	if apierrors.IsNotFound(err) {
@@ -533,109 +534,78 @@ func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Conte
 
 // Helper functions for data conversion
 
-func (r *ResultsExporterReconciler) extractNamespaceFromAlert(alert *central.Alert) string {
-	// Check both formats: list endpoint has Deployment at top level, detail endpoint has it in Entity
-	if alert.Deployment != nil && alert.Deployment.Namespace != "" {
-		return alert.Deployment.Namespace
+func (r *ResultsExporterReconciler) extractNamespaceFromAlert(alert *storage.ListAlert) string {
+	// Check deployment first
+	if deployment := alert.GetDeployment(); deployment != nil && deployment.GetNamespace() != "" {
+		return deployment.GetNamespace()
 	}
-	if alert.Entity != nil && alert.Entity.Deployment != nil && alert.Entity.Deployment.Namespace != "" {
-		return alert.Entity.Deployment.Namespace
-	}
-	if alert.CommonEntityInfo != nil && alert.CommonEntityInfo.Namespace != "" {
-		return alert.CommonEntityInfo.Namespace
+	// For resources, check common entity info (resource only has name field)
+	if common := alert.GetCommonEntityInfo(); common != nil && common.GetNamespace() != "" {
+		return common.GetNamespace()
 	}
 	return ""
 }
 
-func (r *ResultsExporterReconciler) convertAlertToAlertData(alert *central.Alert) resultsv1alpha1.AlertData {
-	alertData := resultsv1alpha1.AlertData{
-		ID:             alert.ID,
-		LifecycleStage: alert.LifecycleStage,
-		State:          alert.State,
+func (r *ResultsExporterReconciler) convertAlertToAlertData(alert *storage.ListAlert) securityv1alpha1.AlertData {
+	alertData := securityv1alpha1.AlertData{
+		ID:             alert.GetId(),
+		LifecycleStage: alert.GetLifecycleStage().String(),
+		State:          alert.GetState().String(),
 	}
 
-	if alert.Policy != nil {
-		alertData.PolicyID = alert.Policy.ID
-		alertData.PolicyName = alert.Policy.Name
-		alertData.PolicySeverity = alert.Policy.Severity
-		alertData.PolicyCategories = alert.Policy.Categories
+	if policy := alert.GetPolicy(); policy != nil {
+		alertData.PolicyID = policy.GetId()
+		alertData.PolicyName = policy.GetName()
+		alertData.PolicySeverity = central.NormalizeStorageSeverity(policy.GetSeverity())
+		alertData.PolicyCategories = policy.GetCategories()
 	}
 
-	if alert.Time != "" {
-		if t, err := time.Parse(time.RFC3339, alert.Time); err == nil {
-			alertData.Time = metav1.NewTime(t)
-		}
+	if alert.GetTime() != nil {
+		alertData.Time = metav1.NewTime(alert.GetTime().AsTime())
 	}
 
-	if alert.FirstOccurred != "" {
-		if t, err := time.Parse(time.RFC3339, alert.FirstOccurred); err == nil {
-			alertData.FirstOccurred = &metav1.Time{Time: t}
-		}
-	}
+	// ListAlert doesn't have FirstOccurred or ResolvedAt, only Alert does
+	// For aggregated mode with ListAlert, these fields won't be populated
 
-	if alert.ResolvedAt != "" {
-		if t, err := time.Parse(time.RFC3339, alert.ResolvedAt); err == nil {
-			alertData.ResolvedAt = &metav1.Time{Time: t}
-		}
-	}
+	// Get common entity info (has cluster/namespace/resource type for resources)
+	common := alert.GetCommonEntityInfo()
 
-	// Convert entity
-	if alert.Entity != nil {
-		alertData.Entity = &resultsv1alpha1.AlertEntity{
-			Type: alert.Entity.Type,
+	// Convert entity from ListAlert
+	if deployment := alert.GetDeployment(); deployment != nil {
+		alertData.Entity = &securityv1alpha1.AlertEntity{
+			Type:        "DEPLOYMENT",
+			ID:          deployment.GetId(),
+			Name:        deployment.GetName(),
+			Namespace:   deployment.GetNamespace(),
+			ClusterName: deployment.GetClusterName(),
+			ClusterID:   deployment.GetClusterId(),
 		}
-		if alert.Entity.Deployment != nil {
-			alertData.Entity.ID = alert.Entity.Deployment.ID
-			alertData.Entity.Name = alert.Entity.Deployment.Name
-			alertData.Entity.Namespace = alert.Entity.Deployment.Namespace
-			alertData.Entity.ClusterName = alert.Entity.Deployment.ClusterName
-			alertData.Entity.ClusterID = alert.Entity.Deployment.ClusterID
+	} else if resource := alert.GetResource(); resource != nil {
+		alertData.Entity = &securityv1alpha1.AlertEntity{
+			Name: resource.GetName(),
 		}
-		if alert.Entity.Resource != nil {
-			alertData.Entity.ResourceType = alert.Entity.Resource.Type
-			alertData.Entity.Name = alert.Entity.Resource.Name
-		}
-	} else if alert.Deployment != nil {
-		alertData.Entity = &resultsv1alpha1.AlertEntity{
-			Type:        "Deployment",
-			ID:          alert.Deployment.ID,
-			Name:        alert.Deployment.Name,
-			Namespace:   alert.Deployment.Namespace,
-			ClusterName: alert.Deployment.ClusterName,
-			ClusterID:   alert.Deployment.ClusterID,
+		// Get cluster/namespace/resource type from common entity info
+		if common != nil {
+			alertData.Entity.ResourceType = common.GetResourceType().String()
+			alertData.Entity.Type = common.GetResourceType().String()
+			alertData.Entity.Namespace = common.GetNamespace()
+			alertData.Entity.ClusterID = common.GetClusterId()
+			alertData.Entity.ClusterName = common.GetClusterName()
 		}
 	}
 
-	// Convert violations
-	if len(alert.Violations) > 0 {
-		alertData.Violations = make([]resultsv1alpha1.Violation, 0, len(alert.Violations))
-		for _, v := range alert.Violations {
-			violation := resultsv1alpha1.Violation{
-				Message: v.Message,
-				Type:    v.Type,
-			}
-			if len(v.KeyValueAttrs) > 0 {
-				violation.KeyValueAttrs = make([]resultsv1alpha1.KeyValueAttr, 0, len(v.KeyValueAttrs))
-				for _, kv := range v.KeyValueAttrs {
-					violation.KeyValueAttrs = append(violation.KeyValueAttrs, resultsv1alpha1.KeyValueAttr{
-						Key:   kv.Key,
-						Value: kv.Value,
-					})
-				}
-			}
-			alertData.Violations = append(alertData.Violations, violation)
-		}
-	}
+	// ListAlert doesn't include violations, only Alert does
+	// For aggregated mode with ListAlert, violations won't be populated
 
 	return alertData
 }
 
-func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *central.ImageScan) resultsv1alpha1.ImageVulnerabilityData {
-	imgData := resultsv1alpha1.ImageVulnerabilityData{
-		Image: resultsv1alpha1.ImageReference{
+func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *central.ImageScan) securityv1alpha1.ImageVulnerabilityData {
+	imgData := securityv1alpha1.ImageVulnerabilityData{
+		Image: securityv1alpha1.ImageReference{
 			Name: img.Image.Name.FullName,
 		},
-		Summary: resultsv1alpha1.VulnerabilitySummary{
+		Summary: securityv1alpha1.VulnerabilitySummary{
 			Total:        img.Summary.TotalCVEs,
 			FixableTotal: img.Summary.FixableCVEs,
 		},
@@ -654,25 +624,25 @@ func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *central.Ima
 
 	// Convert severity counts
 	if img.Summary.CriticalSeverity != nil {
-		imgData.Summary.Critical = &resultsv1alpha1.SeverityCount{
+		imgData.Summary.Critical = &securityv1alpha1.SeverityCount{
 			Total:   img.Summary.CriticalSeverity.Total,
 			Fixable: img.Summary.CriticalSeverity.Fixable,
 		}
 	}
 	if img.Summary.HighSeverity != nil {
-		imgData.Summary.High = &resultsv1alpha1.SeverityCount{
+		imgData.Summary.High = &securityv1alpha1.SeverityCount{
 			Total:   img.Summary.HighSeverity.Total,
 			Fixable: img.Summary.HighSeverity.Fixable,
 		}
 	}
 	if img.Summary.MediumSeverity != nil {
-		imgData.Summary.Medium = &resultsv1alpha1.SeverityCount{
+		imgData.Summary.Medium = &securityv1alpha1.SeverityCount{
 			Total:   img.Summary.MediumSeverity.Total,
 			Fixable: img.Summary.MediumSeverity.Fixable,
 		}
 	}
 	if img.Summary.LowSeverity != nil {
-		imgData.Summary.Low = &resultsv1alpha1.SeverityCount{
+		imgData.Summary.Low = &securityv1alpha1.SeverityCount{
 			Total:   img.Summary.LowSeverity.Total,
 			Fixable: img.Summary.LowSeverity.Fixable,
 		}
@@ -684,12 +654,12 @@ func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *central.Ima
 	return imgData
 }
 
-func (r *ResultsExporterReconciler) convertNodeToNodeVulnData(node *central.NodeScan) resultsv1alpha1.NodeVulnerabilityData {
-	nodeData := resultsv1alpha1.NodeVulnerabilityData{
+func (r *ResultsExporterReconciler) convertNodeToNodeVulnData(node *central.NodeScan) securityv1alpha1.NodeVulnerabilityData {
+	nodeData := securityv1alpha1.NodeVulnerabilityData{
 		NodeName:      node.NodeName,
 		OSImage:       node.OSImage,
 		KernelVersion: node.KernelVersion,
-		Summary: resultsv1alpha1.VulnerabilitySummary{
+		Summary: securityv1alpha1.VulnerabilitySummary{
 			Total:        node.Summary.TotalCVEs,
 			FixableTotal: node.Summary.FixableCVEs,
 		},
@@ -703,25 +673,25 @@ func (r *ResultsExporterReconciler) convertNodeToNodeVulnData(node *central.Node
 
 	// Convert severity counts
 	if node.Summary.CriticalSeverity != nil {
-		nodeData.Summary.Critical = &resultsv1alpha1.SeverityCount{
+		nodeData.Summary.Critical = &securityv1alpha1.SeverityCount{
 			Total:   node.Summary.CriticalSeverity.Total,
 			Fixable: node.Summary.CriticalSeverity.Fixable,
 		}
 	}
 	if node.Summary.HighSeverity != nil {
-		nodeData.Summary.High = &resultsv1alpha1.SeverityCount{
+		nodeData.Summary.High = &securityv1alpha1.SeverityCount{
 			Total:   node.Summary.HighSeverity.Total,
 			Fixable: node.Summary.HighSeverity.Fixable,
 		}
 	}
 	if node.Summary.MediumSeverity != nil {
-		nodeData.Summary.Medium = &resultsv1alpha1.SeverityCount{
+		nodeData.Summary.Medium = &securityv1alpha1.SeverityCount{
 			Total:   node.Summary.MediumSeverity.Total,
 			Fixable: node.Summary.MediumSeverity.Fixable,
 		}
 	}
 	if node.Summary.LowSeverity != nil {
-		nodeData.Summary.Low = &resultsv1alpha1.SeverityCount{
+		nodeData.Summary.Low = &securityv1alpha1.SeverityCount{
 			Total:   node.Summary.LowSeverity.Total,
 			Fixable: node.Summary.LowSeverity.Fixable,
 		}
@@ -730,8 +700,8 @@ func (r *ResultsExporterReconciler) convertNodeToNodeVulnData(node *central.Node
 	return nodeData
 }
 
-func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(spec *resultsv1alpha1.SecurityResultsSpec) *resultsv1alpha1.SecurityResultsSummary {
-	summary := &resultsv1alpha1.SecurityResultsSummary{}
+func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(spec *securityv1alpha1.SecurityResultsSpec) *securityv1alpha1.SecuritySummary {
+	summary := &securityv1alpha1.SecuritySummary{}
 
 	// Count alerts by severity
 	for _, alert := range spec.Alerts {
@@ -758,8 +728,8 @@ func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(spec *result
 	return summary
 }
 
-func (r *ResultsExporterReconciler) calculateClusterSecurityResultsSummary(spec *resultsv1alpha1.ClusterSecurityResultsSpec) *resultsv1alpha1.ClusterSecurityResultsSummary {
-	summary := &resultsv1alpha1.ClusterSecurityResultsSummary{
+func (r *ResultsExporterReconciler) calculateClusterSecurityResultsSummary(spec *securityv1alpha1.ClusterSecurityResultsSpec) *securityv1alpha1.ClusterSecuritySummary {
+	summary := &securityv1alpha1.ClusterSecuritySummary{
 		NodesScanned: len(spec.NodeVulnerabilities),
 	}
 
@@ -815,17 +785,20 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 	createdCount := 0
 	for _, alert := range alerts {
 		// Determine if this is a namespace-scoped or cluster-scoped alert
-		// Check both formats: list endpoint has Deployment at top level, detail endpoint has it in Entity
+		// Extract namespace from the alert entity
 		var namespace string
-		if alert.Deployment != nil && alert.Deployment.Namespace != "" {
-			namespace = alert.Deployment.Namespace
-		} else if alert.Entity != nil && alert.Entity.Deployment != nil && alert.Entity.Deployment.Namespace != "" {
-			namespace = alert.Entity.Deployment.Namespace
+		if deployment := alert.GetDeployment(); deployment != nil && deployment.GetNamespace() != "" {
+			namespace = deployment.GetNamespace()
+		} else if resource := alert.GetResource(); resource != nil {
+			// Resources might have namespace in common entity info
+			if common := alert.GetCommonEntityInfo(); common != nil && common.GetNamespace() != "" {
+				namespace = common.GetNamespace()
+			}
 		}
 
 		if namespace != "" {
 			// Create/update namespace-scoped Alert
-			crd := alert.ConvertToCRD()
+			crd := central.ConvertListAlertToCRD(alert)
 			crd.Namespace = namespace
 
 			// Create or update
@@ -861,7 +834,7 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 			}
 		} else {
 			// Create/update cluster-scoped ClusterAlert
-			crd := alert.ConvertToClusterCRD()
+			crd := central.ConvertListAlertToClusterCRD(alert)
 
 			// Create or update
 			existing := &securityv1alpha1.ClusterAlert{}

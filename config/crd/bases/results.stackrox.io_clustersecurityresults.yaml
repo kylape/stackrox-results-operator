@@ -1,0 +1,280 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: clustersecurityresults.results.stackrox.io
+spec:
+  group: results.stackrox.io
+  names:
+    kind: ClusterSecurityResults
+    listKind: ClusterSecurityResultsList
+    plural: clustersecurityresults
+    singular: clustersecurityresults
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.summary.nodesScanned
+      name: Nodes
+      type: integer
+    - jsonPath: .status.summary.nodesWithCritical
+      name: Critical
+      type: integer
+    - jsonPath: .status.summary.nodesWithHigh
+      name: High
+      type: integer
+    - jsonPath: .status.summary.totalCVEs
+      name: Total CVEs
+      type: integer
+    - jsonPath: .status.summary.fixableCVEs
+      name: Fixable
+      type: integer
+    - jsonPath: .status.lastUpdated
+      name: Last Updated
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ClusterSecurityResults is the Schema for the clustersecurityresults API
+          This aggregates all cluster-wide security findings into a single resource
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ClusterSecurityResultsSpec defines the desired state of ClusterSecurityResults
+              This aggregates cluster-wide security findings (node vulnerabilities)
+            properties:
+              nodeVulnerabilities:
+                description: All node vulnerabilities in the cluster
+                items:
+                  description: NodeVulnerabilityData contains node vulnerability information
+                  properties:
+                    cves:
+                      description: Top CVEs (limited)
+                      items:
+                        description: CVE describes a vulnerability
+                        properties:
+                          component:
+                            description: Vulnerable component
+                            properties:
+                              location:
+                                description: Component location in the image
+                                type: string
+                              name:
+                                description: Component name
+                                type: string
+                              version:
+                                description: Component version
+                                type: string
+                            type: object
+                          cve:
+                            description: CVE identifier
+                            pattern: ^CVE-[0-9]{4}-[0-9]+$
+                            type: string
+                          cvss:
+                            description: CVSS score (0-10)
+                            type: string
+                          cvssV3:
+                            description: CVSSv3 scoring
+                            properties:
+                              score:
+                                description: CVSS v3 score
+                                type: string
+                              vector:
+                                description: CVSS v3 vector
+                                type: string
+                            required:
+                            - score
+                            - vector
+                            type: object
+                          discoveredInImage:
+                            description: When the CVE was discovered in the image
+                            format: date-time
+                            type: string
+                          epss:
+                            description: Exploit Prediction Scoring System data
+                            properties:
+                              percentile:
+                                description: EPSS percentile (0-1)
+                                type: string
+                              score:
+                                description: EPSS score (0-1)
+                                type: string
+                            required:
+                            - percentile
+                            - score
+                            type: object
+                          fixable:
+                            description: Whether this CVE is fixable
+                            type: boolean
+                          fixedBy:
+                            description: Version that fixes this CVE
+                            type: string
+                          link:
+                            description: Link to CVE details
+                            type: string
+                          published:
+                            description: When the CVE was published
+                            format: date-time
+                            type: string
+                          severity:
+                            description: Severity level
+                            enum:
+                            - CRITICAL
+                            - HIGH
+                            - MEDIUM
+                            - LOW
+                            type: string
+                          state:
+                            description: Current state of the CVE
+                            enum:
+                            - OBSERVED
+                            - DEFERRED
+                            - FALSE_POSITIVE
+                            type: string
+                          summary:
+                            description: Short description of the vulnerability
+                            type: string
+                        required:
+                        - cve
+                        - severity
+                        type: object
+                      maxItems: 50
+                      type: array
+                    kernelVersion:
+                      description: Kernel version
+                      type: string
+                    nodeName:
+                      description: Name of the node
+                      type: string
+                    osImage:
+                      description: Operating system image
+                      type: string
+                    scanTime:
+                      description: When the node was scanned
+                      format: date-time
+                      type: string
+                    summary:
+                      description: Vulnerability summary
+                      properties:
+                        critical:
+                          description: Critical severity vulnerabilities
+                          properties:
+                            fixable:
+                              description: Fixable vulnerabilities at this severity
+                              type: integer
+                            total:
+                              description: Total vulnerabilities at this severity
+                              type: integer
+                          required:
+                          - fixable
+                          - total
+                          type: object
+                        fixableTotal:
+                          description: Total number of fixable vulnerabilities
+                          type: integer
+                        high:
+                          description: High severity vulnerabilities
+                          properties:
+                            fixable:
+                              description: Fixable vulnerabilities at this severity
+                              type: integer
+                            total:
+                              description: Total vulnerabilities at this severity
+                              type: integer
+                          required:
+                          - fixable
+                          - total
+                          type: object
+                        low:
+                          description: Low severity vulnerabilities
+                          properties:
+                            fixable:
+                              description: Fixable vulnerabilities at this severity
+                              type: integer
+                            total:
+                              description: Total vulnerabilities at this severity
+                              type: integer
+                          required:
+                          - fixable
+                          - total
+                          type: object
+                        medium:
+                          description: Medium severity vulnerabilities
+                          properties:
+                            fixable:
+                              description: Fixable vulnerabilities at this severity
+                              type: integer
+                            total:
+                              description: Total vulnerabilities at this severity
+                              type: integer
+                          required:
+                          - fixable
+                          - total
+                          type: object
+                        total:
+                          description: Total number of vulnerabilities
+                          type: integer
+                      required:
+                      - fixableTotal
+                      - total
+                      type: object
+                  required:
+                  - nodeName
+                  - osImage
+                  - scanTime
+                  - summary
+                  type: object
+                type: array
+            type: object
+          status:
+            description: ClusterSecurityResultsStatus defines the observed state of
+              ClusterSecurityResults
+            properties:
+              lastUpdated:
+                description: Last update time
+                format: date-time
+                type: string
+              summary:
+                description: Summary counts across all nodes
+                properties:
+                  fixableCVEs:
+                    description: Fixable CVEs across all nodes
+                    type: integer
+                  nodesScanned:
+                    description: Number of nodes scanned
+                    type: integer
+                  nodesWithCritical:
+                    description: Nodes with critical vulnerabilities
+                    type: integer
+                  nodesWithHigh:
+                    description: Nodes with high vulnerabilities
+                    type: integer
+                  totalCVEs:
+                    description: Total CVEs across all nodes
+                    type: integer
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

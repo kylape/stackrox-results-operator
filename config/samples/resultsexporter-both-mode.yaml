@@ -16,6 +16,7 @@ spec:
   central:
     endpoint: https://central.stackrox.svc:443
     authSecretName: central-auth
+    authSecretNamespace: stackrox
     tlsConfig:
       insecureSkipVerify: true
 
@@ -29,7 +30,7 @@ spec:
     alerts:
       enabled: true
       filters:
-        minSeverity: HIGH
+        minSeverity: LOW
         excludeResolved: true
       maxPerNamespace: 1000
 

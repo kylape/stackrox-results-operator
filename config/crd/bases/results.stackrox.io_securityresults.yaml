@@ -1,0 +1,415 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: securityresults.results.stackrox.io
+spec:
+  group: results.stackrox.io
+  names:
+    kind: SecurityResults
+    listKind: SecurityResultsList
+    plural: securityresults
+    singular: securityresults
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.summary.criticalAlerts
+      name: Critical Alerts
+      type: integer
+    - jsonPath: .status.summary.highAlerts
+      name: High Alerts
+      type: integer
+    - jsonPath: .status.summary.totalAlerts
+      name: Total Alerts
+      type: integer
+    - jsonPath: .status.summary.criticalCVEs
+      name: Critical CVEs
+      type: integer
+    - jsonPath: .status.summary.totalCVEs
+      name: Total CVEs
+      type: integer
+    - jsonPath: .status.lastUpdated
+      name: Last Updated
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SecurityResults is the Schema for the securityresults API
+          This aggregates all security findings for a namespace into a single resource
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SecurityResultsSpec defines the desired state of SecurityResults
+              This is an aggregated view of all security findings in a namespace
+            properties:
+              alerts:
+                description: All alerts in this namespace
+                items:
+                  description: AlertData contains the same information as Alert.Spec
+                  properties:
+                    entity:
+                      description: Entity that violated the policy
+                      properties:
+                        clusterId:
+                          description: Cluster ID
+                          type: string
+                        clusterName:
+                          description: Cluster name
+                          type: string
+                        id:
+                          description: Entity ID
+                          type: string
+                        name:
+                          description: Entity name (deployment name, image name, resource
+                            name, etc.)
+                          type: string
+                        namespace:
+                          description: Namespace (for namespaced entities)
+                          type: string
+                        resourceType:
+                          description: Resource type (for Resource entities - e.g.,
+                            "Secret", "ConfigMap")
+                          type: string
+                        type:
+                          description: Type of entity (Deployment, Pod, Image, Node,
+                            Resource)
+                          type: string
+                      type: object
+                    firstOccurred:
+                      description: When this alert was first triggered
+                      format: date-time
+                      type: string
+                    id:
+                      description: Alert ID from Central
+                      type: string
+                    lifecycleStage:
+                      description: Lifecycle stage
+                      enum:
+                      - DEPLOY
+                      - RUNTIME
+                      type: string
+                    policyCategories:
+                      items:
+                        type: string
+                      type: array
+                    policyId:
+                      description: Policy information
+                      type: string
+                    policyName:
+                      type: string
+                    policySeverity:
+                      enum:
+                      - CRITICAL
+                      - HIGH
+                      - MEDIUM
+                      - LOW
+                      type: string
+                    resolvedAt:
+                      description: When the alert was resolved
+                      format: date-time
+                      type: string
+                    state:
+                      description: Current state
+                      enum:
+                      - ACTIVE
+                      - RESOLVED
+                      - ATTEMPTED
+                      type: string
+                    time:
+                      description: When this alert occurred
+                      format: date-time
+                      type: string
+                    violations:
+                      description: Specific violations
+                      items:
+                        description: Violation describes a specific policy violation
+                        properties:
+                          keyValueAttrs:
+                            description: Additional violation attributes
+                            items:
+                              description: KeyValueAttr is a key-value pair for violation
+                                details
+                              properties:
+                                key:
+                                  type: string
+                                value:
+                                  type: string
+                              required:
+                              - key
+                              - value
+                              type: object
+                            type: array
+                          message:
+                            description: Human-readable violation message
+                            type: string
+                          type:
+                            description: Type of violation
+                            type: string
+                        type: object
+                      type: array
+                  required:
+                  - id
+                  - lifecycleStage
+                  - policyId
+                  - policyName
+                  - policySeverity
+                  - time
+                  type: object
+                type: array
+              imageVulnerabilities:
+                description: All image vulnerabilities for images used in this namespace
+                items:
+                  description: ImageVulnerabilityData contains image vulnerability
+                    information
+                  properties:
+                    cves:
+                      description: Top CVEs (limited)
+                      items:
+                        description: CVE describes a vulnerability
+                        properties:
+                          component:
+                            description: Vulnerable component
+                            properties:
+                              location:
+                                description: Component location in the image
+                                type: string
+                              name:
+                                description: Component name
+                                type: string
+                              version:
+                                description: Component version
+                                type: string
+                            type: object
+                          cve:
+                            description: CVE identifier
+                            pattern: ^CVE-[0-9]{4}-[0-9]+$
+                            type: string
+                          cvss:
+                            description: CVSS score (0-10)
+                            type: string
+                          cvssV3:
+                            description: CVSSv3 scoring
+                            properties:
+                              score:
+                                description: CVSS v3 score
+                                type: string
+                              vector:
+                                description: CVSS v3 vector
+                                type: string
+                            required:
+                            - score
+                            - vector
+                            type: object
+                          discoveredInImage:
+                            description: When the CVE was discovered in the image
+                            format: date-time
+                            type: string
+                          epss:
+                            description: Exploit Prediction Scoring System data
+                            properties:
+                              percentile:
+                                description: EPSS percentile (0-1)
+                                type: string
+                              score:
+                                description: EPSS score (0-1)
+                                type: string
+                            required:
+                            - percentile
+                            - score
+                            type: object
+                          fixable:
+                            description: Whether this CVE is fixable
+                            type: boolean
+                          fixedBy:
+                            description: Version that fixes this CVE
+                            type: string
+                          link:
+                            description: Link to CVE details
+                            type: string
+                          published:
+                            description: When the CVE was published
+                            format: date-time
+                            type: string
+                          severity:
+                            description: Severity level
+                            enum:
+                            - CRITICAL
+                            - HIGH
+                            - MEDIUM
+                            - LOW
+                            type: string
+                          state:
+                            description: Current state of the CVE
+                            enum:
+                            - OBSERVED
+                            - DEFERRED
+                            - FALSE_POSITIVE
+                            type: string
+                          summary:
+                            description: Short description of the vulnerability
+                            type: string
+                        required:
+                        - cve
+                        - severity
+                        type: object
+                      maxItems: 50
+                      type: array
+                    image:
+                      description: Image reference
+                      properties:
+                        fullName:
+                          description: Complete image reference
+                          type: string
+                        name:
+                          description: Image name
+                          type: string
+                        registry:
+                          description: Registry hosting the image
+                          type: string
+                        remote:
+                          description: Remote path in registry
+                          type: string
+                        sha:
+                          description: Image SHA digest
+                          type: string
+                        tag:
+                          description: Image tag
+                          type: string
+                      required:
+                      - name
+                      - sha
+                      type: object
+                    scanTime:
+                      description: When the image was scanned
+                      format: date-time
+                      type: string
+                    summary:
+                      description: Vulnerability summary
+                      properties:
+                        critical:
+                          description: Critical severity vulnerabilities
+                          properties:
+                            fixable:
+                              description: Fixable vulnerabilities at this severity
+                              type: integer
+                            total:
+                              description: Total vulnerabilities at this severity
+                              type: integer
+                          required:
+                          - fixable
+                          - total
+                          type: object
+                        fixableTotal:
+                          description: Total number of fixable vulnerabilities
+                          type: integer
+                        high:
+                          description: High severity vulnerabilities
+                          properties:
+                            fixable:
+                              description: Fixable vulnerabilities at this severity
+                              type: integer
+                            total:
+                              description: Total vulnerabilities at this severity
+                              type: integer
+                          required:
+                          - fixable
+                          - total
+                          type: object
+                        low:
+                          description: Low severity vulnerabilities
+                          properties:
+                            fixable:
+                              description: Fixable vulnerabilities at this severity
+                              type: integer
+                            total:
+                              description: Total vulnerabilities at this severity
+                              type: integer
+                          required:
+                          - fixable
+                          - total
+                          type: object
+                        medium:
+                          description: Medium severity vulnerabilities
+                          properties:
+                            fixable:
+                              description: Fixable vulnerabilities at this severity
+                              type: integer
+                            total:
+                              description: Total vulnerabilities at this severity
+                              type: integer
+                          required:
+                          - fixable
+                          - total
+                          type: object
+                        total:
+                          description: Total number of vulnerabilities
+                          type: integer
+                      required:
+                      - fixableTotal
+                      - total
+                      type: object
+                  required:
+                  - image
+                  - scanTime
+                  - summary
+                  type: object
+                type: array
+              namespace:
+                description: Namespace this result applies to
+                type: string
+            required:
+            - namespace
+            type: object
+          status:
+            description: SecurityResultsStatus defines the observed state of SecurityResults
+            properties:
+              lastUpdated:
+                description: Last update time
+                format: date-time
+                type: string
+              summary:
+                description: Summary counts
+                properties:
+                  criticalAlerts:
+                    type: integer
+                  criticalCVEs:
+                    type: integer
+                  fixableCVEs:
+                    type: integer
+                  highAlerts:
+                    type: integer
+                  highCVEs:
+                    type: integer
+                  totalAlerts:
+                    description: Alert counts by severity
+                    type: integer
+                  totalCVEs:
+                    description: CVE counts across all images
+                    type: integer
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
