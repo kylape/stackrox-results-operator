@@ -23,6 +23,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/stackrox/rox/generated/storage"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,6 +59,7 @@ type ResultsExporterReconciler struct {
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=clustersecurityresults,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
 const (
 	// Condition types
@@ -409,19 +411,42 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		counts.Alerts++
 	}
 
-	// Group image vulnerabilities by namespace
-	// Note: Images are cluster-scoped in reality, but we'll include them in SecurityResults
-	// for namespaces where they're actively used. For now, we'll just create one SecurityResults
-	// per namespace that was found in alerts.
+	// Query pods to determine which images are used in which namespaces
+	imagesByNamespace, err := r.getImagesByNamespace(ctx)
+	if err != nil {
+		logger.Error(err, "Failed to query pods for image-to-namespace mapping")
+		// Continue without image filtering
+		imagesByNamespace = make(map[string]map[string]bool)
+	}
+
+	// Group image vulnerabilities by namespace based on actual pod usage
 	for _, img := range images {
+		if img == nil || img.Image == nil || img.Image.Name == nil {
+			continue
+		}
+
 		// Convert image to ImageVulnerabilityData
 		imgData := r.convertImageToImageVulnData(img)
+		imageFullName := img.Image.Name.FullName
 
-		// Add to each namespace (or could be smarter about which namespaces use which images)
-		for ns := range namespaceData {
-			namespaceData[ns].ImageVulnerabilities = append(namespaceData[ns].ImageVulnerabilities, imgData)
+		// Add this image vulnerability to each namespace that uses it
+		addedToAnyNamespace := false
+		for ns, images := range imagesByNamespace {
+			if images[imageFullName] {
+				// Ensure namespace exists in namespaceData
+				if namespaceData[ns] == nil {
+					namespaceData[ns] = &securityv1alpha1.SecurityResultsSpec{
+						Namespace: ns,
+					}
+				}
+				namespaceData[ns].ImageVulnerabilities = append(namespaceData[ns].ImageVulnerabilities, imgData)
+				addedToAnyNamespace = true
+			}
 		}
-		counts.ImageVulnerabilities++
+
+		if addedToAnyNamespace {
+			counts.ImageVulnerabilities++
+		}
 	}
 
 	// Create/update SecurityResults CR for each namespace
@@ -1106,6 +1131,47 @@ func (r *ResultsExporterReconciler) syncNodeVulnerabilitiesIndividual(ctx contex
 	}
 
 	return createdCount, nil
+}
+
+// getImagesByNamespace queries all pods to build a map of namespace -> images used
+func (r *ResultsExporterReconciler) getImagesByNamespace(ctx context.Context) (map[string]map[string]bool, error) {
+	logger := log.FromContext(ctx)
+
+	// Query all pods across all namespaces
+	podList := &corev1.PodList{}
+	if err := r.List(ctx, podList); err != nil {
+		return nil, errors.Wrap(err, "failed to list pods")
+	}
+
+	logger.V(1).Info("Queried pods for image-to-namespace mapping", "podCount", len(podList.Items))
+
+	// Build map of namespace -> set of image names
+	imagesByNamespace := make(map[string]map[string]bool)
+
+	for _, pod := range podList.Items {
+		namespace := pod.Namespace
+		if imagesByNamespace[namespace] == nil {
+			imagesByNamespace[namespace] = make(map[string]bool)
+		}
+
+		// Extract images from all containers
+		for _, container := range pod.Spec.Containers {
+			imagesByNamespace[namespace][container.Image] = true
+		}
+
+		// Also check init containers
+		for _, container := range pod.Spec.InitContainers {
+			imagesByNamespace[namespace][container.Image] = true
+		}
+
+		// And ephemeral containers
+		for _, container := range pod.Spec.EphemeralContainers {
+			imagesByNamespace[namespace][container.Image] = true
+		}
+	}
+
+	logger.V(1).Info("Built image-to-namespace mapping", "namespaceCount", len(imagesByNamespace))
+	return imagesByNamespace, nil
 }
 
 // cleanupAllManagedResources deletes all resources managed by this exporter
