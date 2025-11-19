@@ -469,7 +469,7 @@ func (img *ImageScan) ConvertToCRD(exporterName string) *securityv1alpha1.ImageV
 	if len(img.CVEs) > 0 {
 		vuln.Status.CVEs = make([]securityv1alpha1.CVE, len(img.CVEs))
 		for i, cve := range img.CVEs {
-			vuln.Status.CVEs[i] = convertCVE(cve)
+			vuln.Status.CVEs[i] = ConvertCVE(cve)
 		}
 	}
 
@@ -532,7 +532,7 @@ func (node *NodeScan) ConvertToCRD(exporterName string) *securityv1alpha1.NodeVu
 	if len(node.CVEs) > 0 {
 		vuln.Status.CVEs = make([]securityv1alpha1.CVE, len(node.CVEs))
 		for i, cve := range node.CVEs {
-			vuln.Status.CVEs[i] = convertCVE(cve)
+			vuln.Status.CVEs[i] = ConvertCVE(cve)
 		}
 	}
 
@@ -608,7 +608,8 @@ func normalizeSeverity(severity string) string {
 	}
 }
 
-func convertCVE(cve *CVE) securityv1alpha1.CVE {
+// ConvertCVE converts a Central CVE to a CRD CVE
+func ConvertCVE(cve *CVE) securityv1alpha1.CVE {
 	cvssStr := ""
 	if cve.CVSS > 0 {
 		cvssStr = fmt.Sprintf("%.1f", cve.CVSS)

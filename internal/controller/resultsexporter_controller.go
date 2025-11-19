@@ -711,8 +711,19 @@ func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *central.Ima
 		}
 	}
 
-	// Note: CVE conversion would go here if we wanted to include top CVEs
-	// For now, we're just including the summary
+	// Convert CVEs (limit to 50 as per CRD validation)
+	if len(img.CVEs) > 0 {
+		maxCVEs := 50
+		cveCount := len(img.CVEs)
+		if cveCount > maxCVEs {
+			cveCount = maxCVEs
+		}
+
+		imgData.CVEs = make([]securityv1alpha1.CVE, cveCount)
+		for i := 0; i < cveCount; i++ {
+			imgData.CVEs[i] = central.ConvertCVE(img.CVEs[i])
+		}
+	}
 
 	return imgData
 }
