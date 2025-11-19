@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	securityv1alpha1 "github.com/kylape/stackrox-results-operator/api/security/v1alpha1"
@@ -64,6 +65,9 @@ const (
 	TypeCentralConnected = "CentralConnected"
 	TypeSyncing          = "Syncing"
 
+	// Finalizer name
+	finalizerName = "results.stackrox.io/cleanup"
+
 	// Default sync interval
 	defaultSyncInterval = 5 * time.Minute
 )
@@ -82,6 +86,40 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		logger.Error(err, "Failed to get ResultsExporter")
 		return ctrl.Result{}, err
+	}
+
+	// Handle deletion
+	if !exporter.ObjectMeta.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(exporter, finalizerName) {
+			logger.Info("ResultsExporter is being deleted, cleaning up managed resources")
+			// Cleanup all managed resources
+			if err := r.cleanupAllManagedResources(ctx, exporter); err != nil {
+				logger.Error(err, "Failed to cleanup managed resources")
+				return ctrl.Result{}, err
+			}
+
+			// Remove finalizer
+			logger.Info("Removing finalizer")
+			controllerutil.RemoveFinalizer(exporter, finalizerName)
+			if err := r.Update(ctx, exporter); err != nil {
+				logger.Error(err, "Failed to remove finalizer")
+				return ctrl.Result{}, err
+			}
+			logger.Info("Finalizer removed, deletion will proceed")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(exporter, finalizerName) {
+		logger.Info("Adding finalizer")
+		controllerutil.AddFinalizer(exporter, finalizerName)
+		if err := r.Update(ctx, exporter); err != nil {
+			logger.Error(err, "Failed to add finalizer")
+			return ctrl.Result{}, err
+		}
+		// Requeue to continue with normal reconciliation
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Initialize status if needed
@@ -176,7 +214,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Exponential backoff on failures: 1s, 2s, 4s, 8s, 16s, ... up to 1 hour
 		// Formula: 2^(failures-1) seconds, capped at 3600 seconds (1 hour)
 		backoffSeconds := 1 << (exporter.Status.ConsecutiveFailures - 1) // 2^(n-1)
-		if backoffSeconds > 3600 {                                        // Cap at 1 hour
+		if backoffSeconds > 3600 {                                       // Cap at 1 hour
 			backoffSeconds = 3600
 		}
 		syncInterval = time.Duration(backoffSeconds) * time.Second
@@ -781,9 +819,14 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 
 	logger.Info("Retrieved alerts from Central", "count", len(alerts))
 
+	// Track current alert IDs for cleanup
+	currentAlertIDs := make(map[string]bool)
+
 	// Create/update Alert CRDs (namespace-scoped) and ClusterAlert CRDs (cluster-scoped)
 	createdCount := 0
 	for _, alert := range alerts {
+		// Track this alert ID
+		currentAlertIDs[alert.GetId()] = true
 		// Determine if this is a namespace-scoped or cluster-scoped alert
 		// Extract namespace from the alert entity
 		var namespace string
@@ -798,7 +841,7 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 
 		if namespace != "" {
 			// Create/update namespace-scoped Alert
-			crd := central.ConvertListAlertToCRD(alert)
+			crd := central.ConvertListAlertToCRD(alert, exporter.Name)
 			crd.Namespace = namespace
 
 			// Create or update
@@ -834,7 +877,7 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 			}
 		} else {
 			// Create/update cluster-scoped ClusterAlert
-			crd := central.ConvertListAlertToClusterCRD(alert)
+			crd := central.ConvertListAlertToClusterCRD(alert, exporter.Name)
 
 			// Create or update
 			existing := &securityv1alpha1.ClusterAlert{}
@@ -871,6 +914,17 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 	}
 
 	logger.Info("Synced alerts", "created/updated", createdCount)
+
+	// Cleanup stale alerts
+	deletedCount, err := r.cleanupStaleAlerts(ctx, exporter, currentAlertIDs)
+	if err != nil {
+		logger.Error(err, "Failed to cleanup stale alerts")
+		// Don't fail the sync, just log the error
+	}
+	if deletedCount > 0 {
+		logger.Info("Deleted stale alerts", "count", deletedCount)
+	}
+
 	return createdCount, nil
 }
 
@@ -903,10 +957,23 @@ func (r *ResultsExporterReconciler) syncImageVulnerabilitiesIndividual(ctx conte
 
 	logger.Info("Retrieved image vulnerabilities from Central", "count", len(images))
 
+	// Track current image names for cleanup
+	currentImageNames := make(map[string]bool)
+
 	// Create/update ImageVulnerability CRDs
 	createdCount := 0
+	skippedCount := 0
 	for _, img := range images {
-		crd := img.ConvertToCRD()
+		crd := img.ConvertToCRD(exporter.Name)
+
+		// Skip images with no vulnerabilities
+		if crd.Status.Summary == nil || crd.Status.Summary.Total == 0 || len(crd.Status.CVEs) == 0 {
+			skippedCount++
+			continue
+		}
+
+		// Track this image's CRD name
+		currentImageNames[crd.Name] = true
 
 		// ImageVulnerability is cluster-scoped
 		existing := &securityv1alpha1.ImageVulnerability{}
@@ -940,7 +1007,21 @@ func (r *ResultsExporterReconciler) syncImageVulnerabilitiesIndividual(ctx conte
 		}
 	}
 
+	if skippedCount > 0 {
+		logger.Info("Skipped images with no vulnerabilities", "count", skippedCount)
+	}
 	logger.Info("Synced image vulnerabilities", "created/updated", createdCount)
+
+	// Cleanup stale image vulnerabilities
+	deletedCount, err := r.cleanupStaleImageVulnerabilities(ctx, exporter, currentImageNames)
+	if err != nil {
+		logger.Error(err, "Failed to cleanup stale image vulnerabilities")
+		// Don't fail the sync, just log the error
+	}
+	if deletedCount > 0 {
+		logger.Info("Deleted stale image vulnerabilities", "count", deletedCount)
+	}
+
 	return createdCount, nil
 }
 
@@ -970,10 +1051,15 @@ func (r *ResultsExporterReconciler) syncNodeVulnerabilitiesIndividual(ctx contex
 
 	logger.Info("Retrieved node vulnerabilities from Central", "count", len(nodes))
 
+	// Track current node names for cleanup
+	currentNodeNames := make(map[string]bool)
+
 	// Create/update NodeVulnerability CRDs
 	createdCount := 0
 	for _, node := range nodes {
-		crd := node.ConvertToCRD()
+		crd := node.ConvertToCRD(exporter.Name)
+		// Track this node's CRD name
+		currentNodeNames[crd.Name] = true
 
 		// NodeVulnerability is cluster-scoped
 		existing := &securityv1alpha1.NodeVulnerability{}
@@ -1008,7 +1094,176 @@ func (r *ResultsExporterReconciler) syncNodeVulnerabilitiesIndividual(ctx contex
 	}
 
 	logger.Info("Synced node vulnerabilities", "created/updated", createdCount)
+
+	// Cleanup stale node vulnerabilities
+	deletedCount, err := r.cleanupStaleNodeVulnerabilities(ctx, exporter, currentNodeNames)
+	if err != nil {
+		logger.Error(err, "Failed to cleanup stale node vulnerabilities")
+		// Don't fail the sync, just log the error
+	}
+	if deletedCount > 0 {
+		logger.Info("Deleted stale node vulnerabilities", "count", deletedCount)
+	}
+
 	return createdCount, nil
+}
+
+// cleanupAllManagedResources deletes all resources managed by this exporter
+func (r *ResultsExporterReconciler) cleanupAllManagedResources(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Cleaning up all managed resources")
+
+	labelSelector := client.MatchingLabels{
+		"results.stackrox.io/exporter": exporter.Name,
+	}
+
+	// Delete all Alert resources
+	if err := r.DeleteAllOf(ctx, &securityv1alpha1.Alert{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
+		logger.Error(err, "Failed to delete Alert resources")
+	}
+
+	// Delete all ClusterAlert resources
+	if err := r.DeleteAllOf(ctx, &securityv1alpha1.ClusterAlert{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
+		logger.Error(err, "Failed to delete ClusterAlert resources")
+	}
+
+	// Delete all ImageVulnerability resources
+	if err := r.DeleteAllOf(ctx, &securityv1alpha1.ImageVulnerability{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
+		logger.Error(err, "Failed to delete ImageVulnerability resources")
+	}
+
+	// Delete all NodeVulnerability resources
+	if err := r.DeleteAllOf(ctx, &securityv1alpha1.NodeVulnerability{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
+		logger.Error(err, "Failed to delete NodeVulnerability resources")
+	}
+
+	// Delete all SecurityResults resources
+	if err := r.DeleteAllOf(ctx, &securityv1alpha1.SecurityResults{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
+		logger.Error(err, "Failed to delete SecurityResults resources")
+	}
+
+	// Delete all ClusterSecurityResults resources
+	if err := r.DeleteAllOf(ctx, &securityv1alpha1.ClusterSecurityResults{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
+		logger.Error(err, "Failed to delete ClusterSecurityResults resources")
+	}
+
+	logger.Info("Completed cleanup of all managed resources")
+	return nil
+}
+
+// cleanupStaleAlerts removes Alert and ClusterAlert resources no longer present in Central
+func (r *ResultsExporterReconciler) cleanupStaleAlerts(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, currentAlertIDs map[string]bool) (int, error) {
+	logger := log.FromContext(ctx)
+	deletedCount := 0
+
+	// Cleanup namespace-scoped Alerts
+	alertList := &securityv1alpha1.AlertList{}
+	if err := r.List(ctx, alertList, client.MatchingLabels{
+		"results.stackrox.io/exporter": exporter.Name,
+	}); err != nil {
+		return 0, errors.Wrap(err, "failed to list existing Alerts")
+	}
+
+	for i := range alertList.Items {
+		alert := &alertList.Items[i]
+		alertID := alert.Labels["stackrox.io/alert-id"]
+		if alertID != "" && !currentAlertIDs[alertID] {
+			logger.V(1).Info("Deleting stale Alert", "name", alert.Name, "namespace", alert.Namespace)
+			if err := r.Delete(ctx, alert); err != nil && !apierrors.IsNotFound(err) {
+				logger.Error(err, "Failed to delete stale Alert", "name", alert.Name)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	// Cleanup cluster-scoped ClusterAlerts
+	clusterAlertList := &securityv1alpha1.ClusterAlertList{}
+	if err := r.List(ctx, clusterAlertList, client.MatchingLabels{
+		"results.stackrox.io/exporter": exporter.Name,
+	}); err != nil {
+		return deletedCount, errors.Wrap(err, "failed to list existing ClusterAlerts")
+	}
+
+	for i := range clusterAlertList.Items {
+		alert := &clusterAlertList.Items[i]
+		alertID := alert.Labels["stackrox.io/alert-id"]
+		if alertID != "" && !currentAlertIDs[alertID] {
+			logger.V(1).Info("Deleting stale ClusterAlert", "name", alert.Name)
+			if err := r.Delete(ctx, alert); err != nil && !apierrors.IsNotFound(err) {
+				logger.Error(err, "Failed to delete stale ClusterAlert", "name", alert.Name)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	if deletedCount > 0 {
+		logger.Info("Cleaned up stale alerts", "deletedCount", deletedCount)
+	}
+	return deletedCount, nil
+}
+
+// cleanupStaleImageVulnerabilities removes ImageVulnerability resources no longer present in Central
+func (r *ResultsExporterReconciler) cleanupStaleImageVulnerabilities(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, currentImageNames map[string]bool) (int, error) {
+	logger := log.FromContext(ctx)
+	deletedCount := 0
+
+	vulnList := &securityv1alpha1.ImageVulnerabilityList{}
+	if err := r.List(ctx, vulnList, client.MatchingLabels{
+		"results.stackrox.io/exporter": exporter.Name,
+	}); err != nil {
+		return 0, errors.Wrap(err, "failed to list existing ImageVulnerabilities")
+	}
+
+	for i := range vulnList.Items {
+		vuln := &vulnList.Items[i]
+		// Use the resource name as the identifier
+		if !currentImageNames[vuln.Name] {
+			logger.V(1).Info("Deleting stale ImageVulnerability", "name", vuln.Name)
+			if err := r.Delete(ctx, vuln); err != nil && !apierrors.IsNotFound(err) {
+				logger.Error(err, "Failed to delete stale ImageVulnerability", "name", vuln.Name)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	if deletedCount > 0 {
+		logger.Info("Cleaned up stale image vulnerabilities", "deletedCount", deletedCount)
+	}
+	return deletedCount, nil
+}
+
+// cleanupStaleNodeVulnerabilities removes NodeVulnerability resources no longer present in Central
+func (r *ResultsExporterReconciler) cleanupStaleNodeVulnerabilities(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, currentNodeNames map[string]bool) (int, error) {
+	logger := log.FromContext(ctx)
+	deletedCount := 0
+
+	vulnList := &securityv1alpha1.NodeVulnerabilityList{}
+	if err := r.List(ctx, vulnList, client.MatchingLabels{
+		"results.stackrox.io/exporter": exporter.Name,
+	}); err != nil {
+		return 0, errors.Wrap(err, "failed to list existing NodeVulnerabilities")
+	}
+
+	for i := range vulnList.Items {
+		vuln := &vulnList.Items[i]
+		// Use the resource name as the identifier
+		if !currentNodeNames[vuln.Name] {
+			logger.V(1).Info("Deleting stale NodeVulnerability", "name", vuln.Name)
+			if err := r.Delete(ctx, vuln); err != nil && !apierrors.IsNotFound(err) {
+				logger.Error(err, "Failed to delete stale NodeVulnerability", "name", vuln.Name)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	if deletedCount > 0 {
+		logger.Info("Cleaned up stale node vulnerabilities", "deletedCount", deletedCount)
+	}
+	return deletedCount, nil
 }
 
 // setCondition sets a condition on the ResultsExporter status

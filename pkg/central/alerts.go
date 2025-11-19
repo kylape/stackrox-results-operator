@@ -145,7 +145,7 @@ func (c *Client) GetAlert(ctx context.Context, alertID string) (*storage.Alert, 
 }
 
 // ConvertListAlertToCRD converts a storage.ListAlert to our Alert CRD format
-func ConvertListAlertToCRD(a *storage.ListAlert) *securityv1alpha1.Alert {
+func ConvertListAlertToCRD(a *storage.ListAlert, exporterName string) *securityv1alpha1.Alert {
 	alert := &securityv1alpha1.Alert{
 		Spec: securityv1alpha1.AlertSpec{},
 		Status: securityv1alpha1.AlertStatus{
@@ -159,10 +159,12 @@ func ConvertListAlertToCRD(a *storage.ListAlert) *securityv1alpha1.Alert {
 	// Set metadata
 	alert.Name = generateAlertNameFromListAlert(a)
 	alert.Labels = map[string]string{
-		"stackrox.io/alert-id":    a.GetId(),
-		"stackrox.io/policy-name": sanitizeLabelValue(a.GetPolicy().GetName()),
-		"stackrox.io/severity":    a.GetPolicy().GetSeverity().String(),
-		"stackrox.io/lifecycle":   a.GetLifecycleStage().String(),
+		"app.kubernetes.io/managed-by": "results-operator",
+		"results.stackrox.io/exporter": exporterName,
+		"stackrox.io/alert-id":         a.GetId(),
+		"stackrox.io/policy-name":      sanitizeLabelValue(a.GetPolicy().GetName()),
+		"stackrox.io/severity":         a.GetPolicy().GetSeverity().String(),
+		"stackrox.io/lifecycle":        a.GetLifecycleStage().String(),
 	}
 
 	// Policy categories
@@ -225,7 +227,7 @@ func ConvertListAlertToCRD(a *storage.ListAlert) *securityv1alpha1.Alert {
 }
 
 // ConvertListAlertToClusterCRD converts a storage.ListAlert to a ClusterAlert CRD
-func ConvertListAlertToClusterCRD(a *storage.ListAlert) *securityv1alpha1.ClusterAlert {
+func ConvertListAlertToClusterCRD(a *storage.ListAlert, exporterName string) *securityv1alpha1.ClusterAlert {
 	alert := &securityv1alpha1.ClusterAlert{
 		Spec: securityv1alpha1.ClusterAlertSpec{},
 		Status: securityv1alpha1.ClusterAlertStatus{
@@ -239,10 +241,12 @@ func ConvertListAlertToClusterCRD(a *storage.ListAlert) *securityv1alpha1.Cluste
 	// Set metadata
 	alert.Name = generateAlertNameFromListAlert(a)
 	alert.Labels = map[string]string{
-		"stackrox.io/alert-id":    a.GetId(),
-		"stackrox.io/policy-name": sanitizeLabelValue(a.GetPolicy().GetName()),
-		"stackrox.io/severity":    a.GetPolicy().GetSeverity().String(),
-		"stackrox.io/lifecycle":   a.GetLifecycleStage().String(),
+		"app.kubernetes.io/managed-by": "results-operator",
+		"results.stackrox.io/exporter": exporterName,
+		"stackrox.io/alert-id":         a.GetId(),
+		"stackrox.io/policy-name":      sanitizeLabelValue(a.GetPolicy().GetName()),
+		"stackrox.io/severity":         a.GetPolicy().GetSeverity().String(),
+		"stackrox.io/lifecycle":        a.GetLifecycleStage().String(),
 	}
 
 	// Policy categories

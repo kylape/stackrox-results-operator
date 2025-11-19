@@ -428,7 +428,7 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 }
 
 // ConvertToCRD converts an ImageScan to ImageVulnerability CRD
-func (img *ImageScan) ConvertToCRD() *securityv1alpha1.ImageVulnerability {
+func (img *ImageScan) ConvertToCRD(exporterName string) *securityv1alpha1.ImageVulnerability {
 	vuln := &securityv1alpha1.ImageVulnerability{
 		Spec:   securityv1alpha1.ImageVulnerabilitySpec{},
 		Status: securityv1alpha1.ImageVulnerabilityStatus{},
@@ -476,7 +476,9 @@ func (img *ImageScan) ConvertToCRD() *securityv1alpha1.ImageVulnerability {
 	// Labels
 	if vuln.Status.Image != nil {
 		vuln.Labels = map[string]string{
-			"stackrox.io/image-name": sanitizeLabelValue(vuln.Status.Image.Name),
+			"app.kubernetes.io/managed-by": "results-operator",
+			"results.stackrox.io/exporter": exporterName,
+			"stackrox.io/image-name":       sanitizeLabelValue(vuln.Status.Image.Name),
 		}
 
 		if vuln.Status.Image.Tag != "" {
@@ -502,7 +504,7 @@ func (img *ImageScan) ConvertToCRD() *securityv1alpha1.ImageVulnerability {
 }
 
 // ConvertToCRD converts a NodeScan to NodeVulnerability CRD
-func (node *NodeScan) ConvertToCRD() *securityv1alpha1.NodeVulnerability {
+func (node *NodeScan) ConvertToCRD(exporterName string) *securityv1alpha1.NodeVulnerability {
 	vuln := &securityv1alpha1.NodeVulnerability{
 		Spec: securityv1alpha1.NodeVulnerabilitySpec{},
 		Status: securityv1alpha1.NodeVulnerabilityStatus{
@@ -536,7 +538,9 @@ func (node *NodeScan) ConvertToCRD() *securityv1alpha1.NodeVulnerability {
 
 	// Labels
 	vuln.Labels = map[string]string{
-		"stackrox.io/node-name": sanitizeLabelValue(node.NodeName),
+		"app.kubernetes.io/managed-by": "results-operator",
+		"results.stackrox.io/exporter": exporterName,
+		"stackrox.io/node-name":        sanitizeLabelValue(node.NodeName),
 	}
 
 	if vuln.Status.Summary != nil && vuln.Status.Summary.Critical != nil && vuln.Status.Summary.Critical.Total > 0 {
