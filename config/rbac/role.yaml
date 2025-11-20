@@ -8,7 +8,6 @@ rules:
   - ""
   resources:
   - namespaces
-  - pods
   - secrets
   verbs:
   - get
@@ -62,8 +61,10 @@ rules:
   resources:
   - alerts/status
   - clusteralerts/status
+  - clustersecurityresults/status
   - imagevulnerabilities/status
   - nodevulnerabilities/status
+  - securityresults/status
   verbs:
   - get
   - patch

@@ -23,7 +23,6 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/stackrox/rox/generated/storage"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,10 +55,11 @@ type ResultsExporterReconciler struct {
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=nodevulnerabilities,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=nodevulnerabilities/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=securityresults,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=security.stackrox.io,resources=securityresults/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=security.stackrox.io,resources=clustersecurityresults,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=security.stackrox.io,resources=clustersecurityresults/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
 const (
 	// Condition types
@@ -389,7 +389,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	}
 
 	// Group data by namespace
-	namespaceData := make(map[string]*securityv1alpha1.SecurityResultsSpec)
+	namespaceData := make(map[string]*securityv1alpha1.SecurityResultsStatus)
 
 	// Group alerts by namespace
 	for _, alert := range alerts {
@@ -400,7 +400,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		}
 
 		if namespaceData[namespace] == nil {
-			namespaceData[namespace] = &securityv1alpha1.SecurityResultsSpec{
+			namespaceData[namespace] = &securityv1alpha1.SecurityResultsStatus{
 				Namespace: namespace,
 			}
 		}
@@ -411,13 +411,18 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		counts.Alerts++
 	}
 
-	// Query pods to determine which images are used in which namespaces
-	imagesByNamespace, err := r.getImagesByNamespace(ctx)
+	// Query Central for deployments to determine which images are used in which namespaces
+	deployments, err := centralClient.ListDeployments(ctx)
 	if err != nil {
-		logger.Error(err, "Failed to query pods for image-to-namespace mapping")
+		logger.Error(err, "Failed to list deployments from Central")
 		// Continue without image filtering
-		imagesByNamespace = make(map[string]map[string]bool)
+		deployments = nil
 	}
+
+	imagesByNamespace := central.GetImagesByNamespaceFromDeployments(deployments)
+	logger.V(1).Info("Built image-to-namespace mapping from Central deployments",
+		"namespaceCount", len(imagesByNamespace),
+		"deploymentCount", len(deployments))
 
 	// Group image vulnerabilities by namespace based on actual pod usage
 	for _, img := range images {
@@ -435,7 +440,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 			if images[imageFullName] {
 				// Ensure namespace exists in namespaceData
 				if namespaceData[ns] == nil {
-					namespaceData[ns] = &securityv1alpha1.SecurityResultsSpec{
+					namespaceData[ns] = &securityv1alpha1.SecurityResultsStatus{
 						Namespace: ns,
 					}
 				}
@@ -451,20 +456,23 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 
 	// Create/update SecurityResults CR for each namespace
 	now := metav1.Now()
-	for namespace, spec := range namespaceData {
+	for namespace, status := range namespaceData {
+		// Calculate summary
+		summary := r.calculateSecurityResultsSummary(status)
+
 		sr := &securityv1alpha1.SecurityResults{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "security-results",
 				Namespace: namespace,
 			},
-			Spec: *spec,
-		}
-
-		// Calculate summary
-		summary := r.calculateSecurityResultsSummary(spec)
-		sr.Status = securityv1alpha1.SecurityResultsStatus{
-			Summary:     summary,
-			LastUpdated: &now,
+			Spec: securityv1alpha1.SecurityResultsSpec{},
+			Status: securityv1alpha1.SecurityResultsStatus{
+				Namespace:            namespace,
+				Alerts:               status.Alerts,
+				ImageVulnerabilities: status.ImageVulnerabilities,
+				Summary:              summary,
+				LastUpdated:          &now,
+			},
 		}
 
 		// Create or update
@@ -546,20 +554,20 @@ func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Conte
 
 	// Create/update ClusterSecurityResults
 	now := metav1.Now()
+
+	// Calculate summary from node data
+	summary := r.calculateClusterSecurityResultsSummary(nodeData)
+
 	csr := &securityv1alpha1.ClusterSecurityResults{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "cluster-security-results",
 		},
-		Spec: securityv1alpha1.ClusterSecurityResultsSpec{
+		Spec: securityv1alpha1.ClusterSecurityResultsSpec{},
+		Status: securityv1alpha1.ClusterSecurityResultsStatus{
 			NodeVulnerabilities: nodeData,
+			Summary:             summary,
+			LastUpdated:         &now,
 		},
-	}
-
-	// Calculate summary
-	summary := r.calculateClusterSecurityResultsSummary(&csr.Spec)
-	csr.Status = securityv1alpha1.ClusterSecurityResultsStatus{
-		Summary:     summary,
-		LastUpdated: &now,
 	}
 
 	// Create or update
@@ -774,11 +782,11 @@ func (r *ResultsExporterReconciler) convertNodeToNodeVulnData(node *central.Node
 	return nodeData
 }
 
-func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(spec *securityv1alpha1.SecurityResultsSpec) *securityv1alpha1.SecuritySummary {
+func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(status *securityv1alpha1.SecurityResultsStatus) *securityv1alpha1.SecuritySummary {
 	summary := &securityv1alpha1.SecuritySummary{}
 
 	// Count alerts by severity
-	for _, alert := range spec.Alerts {
+	for _, alert := range status.Alerts {
 		summary.TotalAlerts++
 		if alert.PolicySeverity == "CRITICAL" {
 			summary.CriticalAlerts++
@@ -788,7 +796,7 @@ func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(spec *securi
 	}
 
 	// Count CVEs across all images
-	for _, img := range spec.ImageVulnerabilities {
+	for _, img := range status.ImageVulnerabilities {
 		summary.TotalCVEs += img.Summary.Total
 		summary.FixableCVEs += img.Summary.FixableTotal
 		if img.Summary.Critical != nil {
@@ -802,13 +810,13 @@ func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(spec *securi
 	return summary
 }
 
-func (r *ResultsExporterReconciler) calculateClusterSecurityResultsSummary(spec *securityv1alpha1.ClusterSecurityResultsSpec) *securityv1alpha1.ClusterSecuritySummary {
+func (r *ResultsExporterReconciler) calculateClusterSecurityResultsSummary(nodeVulnerabilities []securityv1alpha1.NodeVulnerabilityData) *securityv1alpha1.ClusterSecuritySummary {
 	summary := &securityv1alpha1.ClusterSecuritySummary{
-		NodesScanned: len(spec.NodeVulnerabilities),
+		NodesScanned: len(nodeVulnerabilities),
 	}
 
 	// Count CVEs and nodes with critical/high vulns
-	for _, node := range spec.NodeVulnerabilities {
+	for _, node := range nodeVulnerabilities {
 		summary.TotalCVEs += node.Summary.Total
 		summary.FixableCVEs += node.Summary.FixableTotal
 
@@ -1142,47 +1150,6 @@ func (r *ResultsExporterReconciler) syncNodeVulnerabilitiesIndividual(ctx contex
 	}
 
 	return createdCount, nil
-}
-
-// getImagesByNamespace queries all pods to build a map of namespace -> images used
-func (r *ResultsExporterReconciler) getImagesByNamespace(ctx context.Context) (map[string]map[string]bool, error) {
-	logger := log.FromContext(ctx)
-
-	// Query all pods across all namespaces
-	podList := &corev1.PodList{}
-	if err := r.List(ctx, podList); err != nil {
-		return nil, errors.Wrap(err, "failed to list pods")
-	}
-
-	logger.V(1).Info("Queried pods for image-to-namespace mapping", "podCount", len(podList.Items))
-
-	// Build map of namespace -> set of image names
-	imagesByNamespace := make(map[string]map[string]bool)
-
-	for _, pod := range podList.Items {
-		namespace := pod.Namespace
-		if imagesByNamespace[namespace] == nil {
-			imagesByNamespace[namespace] = make(map[string]bool)
-		}
-
-		// Extract images from all containers
-		for _, container := range pod.Spec.Containers {
-			imagesByNamespace[namespace][container.Image] = true
-		}
-
-		// Also check init containers
-		for _, container := range pod.Spec.InitContainers {
-			imagesByNamespace[namespace][container.Image] = true
-		}
-
-		// And ephemeral containers
-		for _, container := range pod.Spec.EphemeralContainers {
-			imagesByNamespace[namespace][container.Image] = true
-		}
-	}
-
-	logger.V(1).Info("Built image-to-namespace mapping", "namespaceCount", len(imagesByNamespace))
-	return imagesByNamespace, nil
 }
 
 // cleanupAllManagedResources deletes all resources managed by this exporter

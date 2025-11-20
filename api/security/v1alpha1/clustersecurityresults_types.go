@@ -21,11 +21,10 @@ import (
 )
 
 // ClusterSecurityResultsSpec defines the desired state of ClusterSecurityResults
-// This aggregates cluster-wide security findings (node vulnerabilities)
+// NOTE: This is a read-only resource created by the operator.
+// Spec is intentionally empty - all data is in Status.
 type ClusterSecurityResultsSpec struct {
-	// All node vulnerabilities in the cluster
-	// +optional
-	NodeVulnerabilities []NodeVulnerabilityData `json:"nodeVulnerabilities,omitempty"`
+	// This resource is managed by the operator and has no user-configurable spec.
 }
 
 // NodeVulnerabilityData contains node vulnerability information
@@ -52,7 +51,12 @@ type NodeVulnerabilityData struct {
 }
 
 // ClusterSecurityResultsStatus defines the observed state of ClusterSecurityResults
+// This contains all the cluster-wide security finding data from StackRox Central
 type ClusterSecurityResultsStatus struct {
+	// All node vulnerabilities in the cluster
+	// +optional
+	NodeVulnerabilities []NodeVulnerabilityData `json:"nodeVulnerabilities,omitempty"`
+
 	// Summary counts across all nodes
 	// +optional
 	Summary *ClusterSecuritySummary `json:"summary,omitempty"`

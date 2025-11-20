@@ -60,7 +60,13 @@ spec:
           spec:
             description: |-
               SecurityResultsSpec defines the desired state of SecurityResults
-              This is an aggregated view of all security findings in a namespace
+              NOTE: This is a read-only resource created by the operator.
+              Spec is intentionally empty - all data is in Status.
+            type: object
+          status:
+            description: |-
+              SecurityResultsStatus defines the observed state of SecurityResults
+              This contains all the security finding data from StackRox Central
             properties:
               alerts:
                 description: All alerts in this namespace
@@ -347,18 +353,12 @@ spec:
                   - summary
                   type: object
                 type: array
-              namespace:
-                description: Namespace this result applies to
-                type: string
-            required:
-            - namespace
-            type: object
-          status:
-            description: SecurityResultsStatus defines the observed state of SecurityResults
-            properties:
               lastUpdated:
                 description: Last update time
                 format: date-time
+                type: string
+              namespace:
+                description: Namespace this result applies to
                 type: string
               summary:
                 description: Summary counts

@@ -31,7 +31,7 @@ func NewUploadHandler(store *storage.MemoryStore) http.HandlerFunc {
 		uploaded := []string{}
 
 		// Expected files
-		fileNames := []string{"alerts", "images", "clusters", "nodes"}
+		fileNames := []string{"alerts", "images", "clusters", "nodes", "deployments"}
 
 		// Process each file
 		for _, fieldName := range fileNames {
@@ -60,7 +60,7 @@ func NewUploadHandler(store *storage.MemoryStore) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"status":   "ok",
 			"uploaded": uploaded,
 		})
@@ -77,7 +77,7 @@ func NewPreprocessHandler(store *storage.MemoryStore) http.HandlerFunc {
 
 		// Get alerts data
 		alertsData := store.GetAlerts()
-		if alertsData == nil || len(alertsData) == 0 {
+		if len(alertsData) == 0 {
 			http.Error(w, "No alerts data loaded", http.StatusBadRequest)
 			return
 		}

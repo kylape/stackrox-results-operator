@@ -9,12 +9,13 @@ import (
 
 // MemoryStore holds all mock Central data in memory
 type MemoryStore struct {
-	mu       sync.RWMutex
-	dataDir  string
-	alerts   []byte // Raw JSON
-	images   []byte // Raw NDJSON
-	clusters []byte // Raw JSON
-	nodes    []byte // Raw JSON
+	mu          sync.RWMutex
+	dataDir     string
+	alerts      []byte // Raw JSON
+	images      []byte // Raw NDJSON
+	deployments []byte // Raw JSON
+	clusters    []byte // Raw JSON
+	nodes       []byte // Raw JSON
 }
 
 // NewMemoryStore creates a new in-memory data store
@@ -35,6 +36,7 @@ func (s *MemoryStore) LoadFromDisk() error {
 	}{
 		{"alerts.json", &s.alerts},
 		{"images.ndjson", &s.images},
+		{"deployments.json", &s.deployments},
 		{"clusters.json", &s.clusters},
 		{"nodes.json", &s.nodes},
 	}
@@ -76,6 +78,8 @@ func (s *MemoryStore) SaveFile(filename string, data []byte) error {
 		s.alerts = data
 	case "images.ndjson":
 		s.images = data
+	case "deployments.json":
+		s.deployments = data
 	case "clusters.json":
 		s.clusters = data
 	case "nodes.json":
@@ -106,6 +110,13 @@ func (s *MemoryStore) GetClusters() []byte {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.clusters
+}
+
+// GetDeployments returns the raw deployments JSON data
+func (s *MemoryStore) GetDeployments() []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.deployments
 }
 
 // GetNodes returns the raw nodes JSON data

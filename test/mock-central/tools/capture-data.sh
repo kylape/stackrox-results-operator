@@ -46,24 +46,32 @@ echo ""
 QUERY="Cluster:$CLUSTER_NAME"
 ENCODED_QUERY=$(printf %s "$QUERY" | jq -sRr @uri)
 
-# Capture alerts
-echo "[1/4] Fetching alerts for cluster '$CLUSTER_NAME'..."
-curl -k -H "Authorization: Bearer $ROX_API_TOKEN" \
-  "https://$API_ENDPOINT/v1/alerts?query=$ENCODED_QUERY" \
-  > "$OUTPUT_DIR/alerts.json"
-ALERT_COUNT=$(jq '.alerts | length' "$OUTPUT_DIR/alerts.json" 2>/dev/null || echo "0")
-echo "      Retrieved $ALERT_COUNT alerts"
+# # Capture alerts
+# echo "[1/4] Fetching alerts for cluster '$CLUSTER_NAME'..."
+# curl -k -H "Authorization: Bearer $ROX_API_TOKEN" \
+#   "https://$API_ENDPOINT/v1/alerts?query=$ENCODED_QUERY" \
+#   > "$OUTPUT_DIR/alerts.json"
+# ALERT_COUNT=$(jq '.alerts | length' "$OUTPUT_DIR/alerts.json" 2>/dev/null || echo "0")
+# echo "      Retrieved $ALERT_COUNT alerts"
 
-# Capture images (NDJSON)
-echo "[2/4] Fetching images for cluster '$CLUSTER_NAME' (this may take a while)..."
+# # Capture images (NDJSON)
+# echo "[2/5] Fetching images for cluster '$CLUSTER_NAME' (this may take a while)..."
+# curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
+#   "https://$API_ENDPOINT/v1/export/images?query=$ENCODED_QUERY" \
+#   > "$OUTPUT_DIR/images.ndjson"
+# IMAGE_COUNT=$(wc -l < "$OUTPUT_DIR/images.ndjson" | tr -d ' ')
+# echo "      Retrieved $IMAGE_COUNT images"
+
+# Capture deployments
+echo "[3/5] Fetching deployments for cluster '$CLUSTER_NAME'..."
 curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-  "https://$API_ENDPOINT/v1/export/images?query=$ENCODED_QUERY" \
-  > "$OUTPUT_DIR/images.ndjson"
-IMAGE_COUNT=$(wc -l < "$OUTPUT_DIR/images.ndjson" | tr -d ' ')
-echo "      Retrieved $IMAGE_COUNT images"
+  "https://$API_ENDPOINT/v1/deployments?query=$ENCODED_QUERY" \
+  > "$OUTPUT_DIR/deployments.json"
+DEPLOYMENT_COUNT=$(jq '.deployments | length' "$OUTPUT_DIR/deployments.json" 2>/dev/null || echo "0")
+echo "      Retrieved $DEPLOYMENT_COUNT deployments"
 
 # Capture clusters
-echo "[3/4] Fetching cluster metadata..."
+echo "[4/5] Fetching cluster metadata..."
 curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
   "https://$API_ENDPOINT/v1/clusters" \
   | jq --arg filter "$CLUSTER_NAME" '{clusters: [.clusters[] | select(.name == $filter)]}' \
@@ -78,7 +86,7 @@ if [ "$CLUSTER_COUNT" = "0" ]; then
     total_nodes=0
 else
     # Capture nodes for the cluster
-    echo "[4/4] Fetching nodes for cluster '$CLUSTER_NAME'..."
+    echo "[5/5] Fetching nodes for cluster '$CLUSTER_NAME'..."
 
     CLUSTER_ID=$(jq -r '.clusters[0].id' "$OUTPUT_DIR/clusters.json")
 
@@ -101,10 +109,11 @@ echo "Data capture complete!"
 echo "======================================"
 echo ""
 echo "Summary:"
-echo "  Cluster:  $CLUSTER_NAME"
-echo "  Alerts:   $ALERT_COUNT"
-echo "  Images:   $IMAGE_COUNT"
-echo "  Nodes:    ${total_nodes:-0}"
+echo "  Cluster:      $CLUSTER_NAME"
+echo "  Alerts:       $ALERT_COUNT"
+echo "  Images:       $IMAGE_COUNT"
+echo "  Deployments:  ${DEPLOYMENT_COUNT:-0}"
+echo "  Nodes:        ${total_nodes:-0}"
 echo ""
 echo "Output directory: $OUTPUT_DIR"
 ls -lh "$OUTPUT_DIR"

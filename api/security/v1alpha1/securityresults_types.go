@@ -21,19 +21,10 @@ import (
 )
 
 // SecurityResultsSpec defines the desired state of SecurityResults
-// This is an aggregated view of all security findings in a namespace
+// NOTE: This is a read-only resource created by the operator.
+// Spec is intentionally empty - all data is in Status.
 type SecurityResultsSpec struct {
-	// Namespace this result applies to
-	// +kubebuilder:validation:Required
-	Namespace string `json:"namespace"`
-
-	// All alerts in this namespace
-	// +optional
-	Alerts []AlertData `json:"alerts,omitempty"`
-
-	// All image vulnerabilities for images used in this namespace
-	// +optional
-	ImageVulnerabilities []ImageVulnerabilityData `json:"imageVulnerabilities,omitempty"`
+	// This resource is managed by the operator and has no user-configurable spec.
 }
 
 // AlertData contains the same information as Alert.Spec
@@ -100,7 +91,20 @@ type ImageVulnerabilityData struct {
 }
 
 // SecurityResultsStatus defines the observed state of SecurityResults
+// This contains all the security finding data from StackRox Central
 type SecurityResultsStatus struct {
+	// Namespace this result applies to
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// All alerts in this namespace
+	// +optional
+	Alerts []AlertData `json:"alerts,omitempty"`
+
+	// All image vulnerabilities for images used in this namespace
+	// +optional
+	ImageVulnerabilities []ImageVulnerabilityData `json:"imageVulnerabilities,omitempty"`
+
 	// Summary counts
 	// +optional
 	Summary *SecuritySummary `json:"summary,omitempty"`

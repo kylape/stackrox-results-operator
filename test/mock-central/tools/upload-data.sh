@@ -20,7 +20,7 @@ echo "Data dir:  $DATA_DIR"
 echo ""
 
 # Check for required files
-REQUIRED_FILES=("alerts.json" "images.ndjson" "clusters.json" "nodes.json")
+REQUIRED_FILES=("alerts.json" "images.ndjson" "deployments.json" "clusters.json" "nodes.json")
 MISSING_FILES=()
 
 for file in "${REQUIRED_FILES[@]}"; do
