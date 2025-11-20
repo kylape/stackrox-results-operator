@@ -28,9 +28,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	securityv1alpha1 "github.com/kylape/stackrox-results-operator/api/security/v1alpha1"
 	resultsv1alpha1 "github.com/kylape/stackrox-results-operator/api/v1alpha1"
@@ -127,6 +129,62 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Initialize status if needed
 	if exporter.Status.Conditions == nil {
 		exporter.Status.Conditions = []metav1.Condition{}
+	}
+
+	// Determine if we need to sync
+	needsSync := false
+	var skipReason string
+
+	// Always sync if generation changed (spec changed)
+	if exporter.Status.ObservedGeneration != exporter.Generation {
+		needsSync = true
+		logger.Info("Spec changed, sync needed",
+			"generation", exporter.Generation,
+			"observedGeneration", exporter.Status.ObservedGeneration)
+	} else if exporter.Status.LastSuccessfulSync == nil {
+		// First sync (never synced before)
+		needsSync = true
+		logger.Info("First sync needed")
+	} else {
+		// Check if it's time for periodic sync
+		syncInterval := defaultSyncInterval
+		if exporter.Spec.SyncInterval != nil {
+			syncInterval = exporter.Spec.SyncInterval.Duration
+		}
+
+		nextSyncTime := exporter.Status.LastSuccessfulSync.Add(syncInterval)
+		if time.Now().After(nextSyncTime) {
+			needsSync = true
+			logger.Info("Periodic sync due",
+				"lastSync", exporter.Status.LastSuccessfulSync.Time,
+				"interval", syncInterval,
+				"nextSync", nextSyncTime)
+		} else {
+			skipReason = fmt.Sprintf("Next sync at %v", nextSyncTime.Format(time.RFC3339))
+		}
+	}
+
+	// Skip sync if not needed
+	if !needsSync {
+		logger.V(1).Info("Sync not needed, skipping", "reason", skipReason)
+		// Still requeue for next periodic sync
+		syncInterval := defaultSyncInterval
+		if exporter.Spec.SyncInterval != nil {
+			syncInterval = exporter.Spec.SyncInterval.Duration
+		}
+
+		// Calculate time until next sync
+		if exporter.Status.LastSuccessfulSync != nil {
+			nextSyncTime := exporter.Status.LastSuccessfulSync.Add(syncInterval)
+			timeUntilNextSync := time.Until(nextSyncTime)
+			if timeUntilNextSync > 0 {
+				logger.V(1).Info("Requeuing for next periodic sync", "after", timeUntilNextSync)
+				return ctrl.Result{RequeueAfter: timeUntilNextSync}, nil
+			}
+		}
+
+		// Fallback to default interval
+		return ctrl.Result{RequeueAfter: syncInterval}, nil
 	}
 
 	// Create Central client
@@ -1362,7 +1420,9 @@ func (r *ResultsExporterReconciler) setCondition(exporter *resultsv1alpha1.Resul
 // SetupWithManager sets up the controller with the Manager.
 func (r *ResultsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&resultsv1alpha1.ResultsExporter{}).
+		For(&resultsv1alpha1.ResultsExporter{},
+			// Only reconcile on spec changes, not status updates
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("resultsexporter").
 		Complete(r)
 }
