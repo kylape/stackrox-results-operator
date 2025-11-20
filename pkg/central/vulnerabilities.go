@@ -10,6 +10,10 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/stackrox/rox/generated/api/v1"
+	"github.com/stackrox/rox/generated/storage"
+	"google.golang.org/protobuf/encoding/protojson"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	securityv1alpha1 "github.com/kylape/stackrox-results-operator/api/security/v1alpha1"
 )
@@ -116,14 +120,7 @@ type SeverityCount struct {
 }
 
 // NodeScan represents a node scan result from Central
-type NodeScan struct {
-	NodeName      string       `json:"nodeName"`
-	OSImage       string       `json:"osImage,omitempty"`
-	KernelVersion string       `json:"kernelVersion,omitempty"`
-	ScanTime      string       `json:"scanTime"`
-	CVEs          []*CVE       `json:"cves,omitempty"`
-	Summary       *VulnSummary `json:"summary,omitempty"`
-}
+// NodeScan type removed - now using storage.Node from StackRox protobuf types
 
 // ListImageVulnerabilitiesOptions contains options for listing image vulnerabilities
 type ListImageVulnerabilitiesOptions struct {
@@ -326,7 +323,7 @@ func calculateVulnSummary(cves []*CVE) *VulnSummary {
 }
 
 // ListNodeVulnerabilities fetches node vulnerability data from Central
-func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string, maxCVEsPerNode int) ([]*NodeScan, error) {
+func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string, maxCVEsPerNode int) ([]*storage.Node, error) {
 	log.V(1).Info("Listing node vulnerabilities from Central")
 
 	// First, get all clusters
@@ -358,7 +355,7 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 	}
 
 	// Collect all nodes from all clusters
-	var allNodes []*NodeScan
+	var allNodes []*storage.Node
 
 	for _, cluster := range clustersResponse.Clusters {
 		log.V(1).Info("Fetching nodes for cluster", "clusterID", cluster.ID, "clusterName", cluster.Name)
@@ -402,11 +399,13 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 			continue // Skip this cluster on error
 		}
 
-		var nodesResponse struct {
-			Nodes []*NodeScan `json:"nodes"`
-		}
+		nodesResponse := v1.ListNodesResponse{}
 
-		if err := json.Unmarshal(body, &nodesResponse); err != nil {
+		// Use protojson to unmarshal, same as alerts.go
+		unmarshaler := protojson.UnmarshalOptions{
+			DiscardUnknown: true, // Ignore fields we don't understand
+		}
+		if err := unmarshaler.Unmarshal(body, &nodesResponse); err != nil {
 			log.Error(err, "Failed to parse nodes response for cluster", "clusterID", cluster.ID)
 			continue // Skip this cluster on error
 		}
@@ -414,13 +413,10 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 		allNodes = append(allNodes, nodesResponse.Nodes...)
 	}
 
-	// Limit CVEs per node if requested
+	// Note: maxCVEsPerNode is no longer applicable since storage.Node doesn't have a CVEs array
+	// It has Components which contain vulnerabilities. Filtering would need to be done differently.
 	if maxCVEsPerNode > 0 {
-		for _, node := range allNodes {
-			if len(node.CVEs) > maxCVEsPerNode {
-				node.CVEs = node.CVEs[:maxCVEsPerNode]
-			}
-		}
+		log.V(1).Info("maxCVEsPerNode parameter is deprecated with storage.Node types")
 	}
 
 	log.Info("Retrieved node vulnerabilities from Central", "count", len(allNodes))
@@ -503,44 +499,117 @@ func (img *ImageScan) ConvertToCRD(exporterName string) *securityv1alpha1.ImageV
 	return vuln
 }
 
-// ConvertToCRD converts a NodeScan to NodeVulnerability CRD
-func (node *NodeScan) ConvertToCRD(exporterName string) *securityv1alpha1.NodeVulnerability {
+// ConvertNodeToCRD converts a storage.Node to NodeVulnerability CRD
+func ConvertNodeToCRD(node *storage.Node, exporterName string) *securityv1alpha1.NodeVulnerability {
 	vuln := &securityv1alpha1.NodeVulnerability{
 		Spec: securityv1alpha1.NodeVulnerabilitySpec{},
 		Status: securityv1alpha1.NodeVulnerabilityStatus{
-			NodeName:      node.NodeName,
-			OSImage:       node.OSImage,
-			KernelVersion: node.KernelVersion,
+			NodeName:      node.GetName(),
+			OSImage:       node.GetOsImage(),
+			KernelVersion: node.GetKernelVersion(),
 		},
 	}
 
 	// Generate name from node name
-	vuln.Name = generateNodeVulnName(node.NodeName)
+	vuln.Name = generateNodeVulnName(node.GetName())
 
-	// Scan time
-	if timeVal, err := parseTime(node.ScanTime); err == nil {
-		vuln.Status.ScanTime = timeVal
-	}
-
-	// Summary
-	if node.Summary != nil {
-		summary := convertVulnSummary(node.Summary)
-		vuln.Status.Summary = &summary
-	}
-
-	// CVEs
-	if len(node.CVEs) > 0 {
-		vuln.Status.CVEs = make([]securityv1alpha1.CVE, len(node.CVEs))
-		for i, cve := range node.CVEs {
-			vuln.Status.CVEs[i] = ConvertCVE(cve)
+	// Extract scan data
+	scan := node.GetScan()
+	if scan != nil {
+		// Scan time
+		if scanTime := scan.GetScanTime(); scanTime != nil {
+			t := metav1.NewTime(scanTime.AsTime())
+			vuln.Status.ScanTime = &t
 		}
+
+		// Extract CVEs and calculate summary from components
+		allCVEs := make(map[string]*securityv1alpha1.CVE) // Deduplicate CVEs by ID
+		criticalCount := &securityv1alpha1.SeverityCount{}
+		highCount := &securityv1alpha1.SeverityCount{}
+		mediumCount := &securityv1alpha1.SeverityCount{}
+		lowCount := &securityv1alpha1.SeverityCount{}
+
+		for _, component := range scan.GetComponents() {
+			for _, vuln := range component.GetVulnerabilities() {
+				cveID := vuln.GetCveBaseInfo().GetCve()
+				if cveID == "" {
+					continue
+				}
+
+				// Add to deduped CVE map
+				if _, exists := allCVEs[cveID]; !exists {
+					cve := securityv1alpha1.CVE{
+						CVE:      cveID,
+						Severity: convertStorageSeverity(vuln.GetSeverity()),
+					}
+					if vuln.GetCvss() > 0 {
+						cve.CVSS = fmt.Sprintf("%.1f", vuln.GetCvss())
+					}
+					if vuln.GetFixedBy() != "" {
+						cve.FixedBy = vuln.GetFixedBy()
+					}
+					allCVEs[cveID] = &cve
+				}
+
+				// Count by severity
+				fixable := vuln.GetFixedBy() != ""
+				switch vuln.GetSeverity() {
+				case storage.VulnerabilitySeverity_CRITICAL_VULNERABILITY_SEVERITY:
+					criticalCount.Total++
+					if fixable {
+						criticalCount.Fixable++
+					}
+				case storage.VulnerabilitySeverity_IMPORTANT_VULNERABILITY_SEVERITY:
+					highCount.Total++
+					if fixable {
+						highCount.Fixable++
+					}
+				case storage.VulnerabilitySeverity_MODERATE_VULNERABILITY_SEVERITY:
+					mediumCount.Total++
+					if fixable {
+						mediumCount.Fixable++
+					}
+				case storage.VulnerabilitySeverity_LOW_VULNERABILITY_SEVERITY:
+					lowCount.Total++
+					if fixable {
+						lowCount.Fixable++
+					}
+				}
+			}
+		}
+
+		// Convert map to slice
+		cveSlice := make([]securityv1alpha1.CVE, 0, len(allCVEs))
+		for _, cve := range allCVEs {
+			cveSlice = append(cveSlice, *cve)
+		}
+		vuln.Status.CVEs = cveSlice
+
+		// Build summary
+		summary := securityv1alpha1.VulnerabilitySummary{
+			Total:        criticalCount.Total + highCount.Total + mediumCount.Total + lowCount.Total,
+			FixableTotal: criticalCount.Fixable + highCount.Fixable + mediumCount.Fixable + lowCount.Fixable,
+		}
+		if criticalCount.Total > 0 {
+			summary.Critical = criticalCount
+		}
+		if highCount.Total > 0 {
+			summary.High = highCount
+		}
+		if mediumCount.Total > 0 {
+			summary.Medium = mediumCount
+		}
+		if lowCount.Total > 0 {
+			summary.Low = lowCount
+		}
+		vuln.Status.Summary = &summary
 	}
 
 	// Labels
 	vuln.Labels = map[string]string{
 		"app.kubernetes.io/managed-by": "results-operator",
 		"results.stackrox.io/exporter": exporterName,
-		"stackrox.io/node-name":        sanitizeLabelValue(node.NodeName),
+		"stackrox.io/node-name":        sanitizeLabelValue(node.GetName()),
 	}
 
 	if vuln.Status.Summary != nil && vuln.Status.Summary.Critical != nil && vuln.Status.Summary.Critical.Total > 0 {
@@ -548,6 +617,22 @@ func (node *NodeScan) ConvertToCRD(exporterName string) *securityv1alpha1.NodeVu
 	}
 
 	return vuln
+}
+
+// convertStorageSeverity converts storage.VulnerabilitySeverity to string
+func convertStorageSeverity(severity storage.VulnerabilitySeverity) string {
+	switch severity {
+	case storage.VulnerabilitySeverity_CRITICAL_VULNERABILITY_SEVERITY:
+		return "CRITICAL"
+	case storage.VulnerabilitySeverity_IMPORTANT_VULNERABILITY_SEVERITY:
+		return "HIGH"
+	case storage.VulnerabilitySeverity_MODERATE_VULNERABILITY_SEVERITY:
+		return "MEDIUM"
+	case storage.VulnerabilitySeverity_LOW_VULNERABILITY_SEVERITY:
+		return "LOW"
+	default:
+		return "UNKNOWN"
+	}
 }
 
 // Helper functions

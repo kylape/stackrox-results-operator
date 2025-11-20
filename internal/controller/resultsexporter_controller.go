@@ -515,7 +515,7 @@ func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Conte
 	logger.Info("Syncing ClusterSecurityResults")
 
 	// Fetch node vulnerabilities from Central
-	var nodes []*central.NodeScan
+	var nodes []*storage.Node
 	if exporter.Spec.Exports.NodeVulnerabilities != nil && exporter.Spec.Exports.NodeVulnerabilities.Enabled {
 		config := exporter.Spec.Exports.NodeVulnerabilities
 
@@ -728,50 +728,93 @@ func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *central.Ima
 	return imgData
 }
 
-func (r *ResultsExporterReconciler) convertNodeToNodeVulnData(node *central.NodeScan) securityv1alpha1.NodeVulnerabilityData {
+func (r *ResultsExporterReconciler) convertNodeToNodeVulnData(node *storage.Node) securityv1alpha1.NodeVulnerabilityData {
 	nodeData := securityv1alpha1.NodeVulnerabilityData{
-		NodeName:      node.NodeName,
-		OSImage:       node.OSImage,
-		KernelVersion: node.KernelVersion,
-		Summary: securityv1alpha1.VulnerabilitySummary{
-			Total:        node.Summary.TotalCVEs,
-			FixableTotal: node.Summary.FixableCVEs,
-		},
+		NodeName:      node.GetName(),
+		OSImage:       node.GetOsImage(),
+		KernelVersion: node.GetKernelVersion(),
 	}
 
-	if node.ScanTime != "" {
-		if t, err := time.Parse(time.RFC3339, node.ScanTime); err == nil {
-			nodeData.ScanTime = metav1.NewTime(t)
+	// Extract scan data if available
+	scan := node.GetScan()
+	if scan != nil {
+		if scanTime := scan.GetScanTime(); scanTime != nil {
+			nodeData.ScanTime = metav1.NewTime(scanTime.AsTime())
 		}
-	}
 
-	// Convert severity counts
-	if node.Summary.CriticalSeverity != nil {
-		nodeData.Summary.Critical = &securityv1alpha1.SeverityCount{
-			Total:   node.Summary.CriticalSeverity.Total,
-			Fixable: node.Summary.CriticalSeverity.Fixable,
-		}
-	}
-	if node.Summary.HighSeverity != nil {
-		nodeData.Summary.High = &securityv1alpha1.SeverityCount{
-			Total:   node.Summary.HighSeverity.Total,
-			Fixable: node.Summary.HighSeverity.Fixable,
-		}
-	}
-	if node.Summary.MediumSeverity != nil {
-		nodeData.Summary.Medium = &securityv1alpha1.SeverityCount{
-			Total:   node.Summary.MediumSeverity.Total,
-			Fixable: node.Summary.MediumSeverity.Fixable,
-		}
-	}
-	if node.Summary.LowSeverity != nil {
-		nodeData.Summary.Low = &securityv1alpha1.SeverityCount{
-			Total:   node.Summary.LowSeverity.Total,
-			Fixable: node.Summary.LowSeverity.Fixable,
-		}
+		// Calculate summary from components
+		// storage.NodeScan doesn't have a pre-computed summary like the old type,
+		// so we need to calculate it from the components
+		summary := r.calculateNodeVulnerabilitySummary(scan.GetComponents())
+		nodeData.Summary = *summary
 	}
 
 	return nodeData
+}
+
+// calculateNodeVulnerabilitySummary calculates vulnerability summary from node scan components
+func (r *ResultsExporterReconciler) calculateNodeVulnerabilitySummary(components []*storage.EmbeddedNodeScanComponent) *securityv1alpha1.VulnerabilitySummary {
+	summary := &securityv1alpha1.VulnerabilitySummary{}
+
+	criticalCount := &securityv1alpha1.SeverityCount{}
+	highCount := &securityv1alpha1.SeverityCount{}
+	mediumCount := &securityv1alpha1.SeverityCount{}
+	lowCount := &securityv1alpha1.SeverityCount{}
+
+	// Aggregate vulnerabilities from all components
+	for _, component := range components {
+		for _, vuln := range component.GetVulnerabilities() {
+			summary.Total++
+
+			// Check if fixable
+			if vuln.GetFixedBy() != "" {
+				summary.FixableTotal++
+			}
+
+			// Count by severity
+			severity := vuln.GetSeverity()
+			fixable := vuln.GetFixedBy() != ""
+
+			switch severity {
+			case storage.VulnerabilitySeverity_CRITICAL_VULNERABILITY_SEVERITY:
+				criticalCount.Total++
+				if fixable {
+					criticalCount.Fixable++
+				}
+			case storage.VulnerabilitySeverity_IMPORTANT_VULNERABILITY_SEVERITY:
+				highCount.Total++
+				if fixable {
+					highCount.Fixable++
+				}
+			case storage.VulnerabilitySeverity_MODERATE_VULNERABILITY_SEVERITY:
+				mediumCount.Total++
+				if fixable {
+					mediumCount.Fixable++
+				}
+			case storage.VulnerabilitySeverity_LOW_VULNERABILITY_SEVERITY:
+				lowCount.Total++
+				if fixable {
+					lowCount.Fixable++
+				}
+			}
+		}
+	}
+
+	// Only include severity counts if non-zero
+	if criticalCount.Total > 0 {
+		summary.Critical = criticalCount
+	}
+	if highCount.Total > 0 {
+		summary.High = highCount
+	}
+	if mediumCount.Total > 0 {
+		summary.Medium = mediumCount
+	}
+	if lowCount.Total > 0 {
+		summary.Low = lowCount
+	}
+
+	return summary
 }
 
 func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(status *securityv1alpha1.SecurityResultsStatus) *securityv1alpha1.SecuritySummary {
@@ -1093,7 +1136,7 @@ func (r *ResultsExporterReconciler) syncNodeVulnerabilitiesIndividual(ctx contex
 	// Create/update NodeVulnerability CRDs
 	createdCount := 0
 	for _, node := range nodes {
-		crd := node.ConvertToCRD(exporter.Name)
+		crd := central.ConvertNodeToCRD(node, exporter.Name)
 		// Track this node's CRD name
 		currentNodeNames[crd.Name] = true
 
