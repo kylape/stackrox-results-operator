@@ -60,8 +60,18 @@ spec:
           spec:
             description: |-
               ClusterSecurityResultsSpec defines the desired state of ClusterSecurityResults
-              This aggregates cluster-wide security findings (node vulnerabilities)
+              NOTE: This is a read-only resource created by the operator.
+              Spec is intentionally empty - all data is in Status.
+            type: object
+          status:
+            description: |-
+              ClusterSecurityResultsStatus defines the observed state of ClusterSecurityResults
+              This contains all the cluster-wide security finding data from StackRox Central
             properties:
+              lastUpdated:
+                description: Last update time
+                format: date-time
+                type: string
               nodeVulnerabilities:
                 description: All node vulnerabilities in the cluster
                 items:
@@ -73,70 +83,59 @@ spec:
                         description: CVE describes a vulnerability
                         properties:
                           component:
-                            description: Vulnerable component
+                            description: Component describes a vulnerable software
+                              component
                             properties:
                               location:
-                                description: Component location in the image
                                 type: string
                               name:
-                                description: Component name
                                 type: string
                               version:
-                                description: Component version
                                 type: string
                             type: object
                           cve:
-                            description: CVE identifier
                             pattern: ^CVE-[0-9]{4}-[0-9]+$
                             type: string
                           cvss:
                             description: CVSS score (0-10)
                             type: string
                           cvssV3:
-                            description: CVSSv3 scoring
+                            description: CVSSv3 contains CVSS v3 scoring
                             properties:
                               score:
-                                description: CVSS v3 score
                                 type: string
                               vector:
-                                description: CVSS v3 vector
                                 type: string
                             required:
                             - score
                             - vector
                             type: object
                           discoveredInImage:
-                            description: When the CVE was discovered in the image
                             format: date-time
                             type: string
                           epss:
-                            description: Exploit Prediction Scoring System data
+                            description: EPSS contains Exploit Prediction Scoring
+                              System data
                             properties:
                               percentile:
-                                description: EPSS percentile (0-1)
                                 type: string
                               score:
-                                description: EPSS score (0-1)
                                 type: string
                             required:
                             - percentile
                             - score
                             type: object
                           fixable:
-                            description: Whether this CVE is fixable
                             type: boolean
                           fixedBy:
                             description: Version that fixes this CVE
                             type: string
                           link:
-                            description: Link to CVE details
                             type: string
                           published:
-                            description: When the CVE was published
                             format: date-time
                             type: string
                           severity:
-                            description: Severity level
                             enum:
                             - CRITICAL
                             - HIGH
@@ -144,94 +143,85 @@ spec:
                             - LOW
                             type: string
                           state:
-                            description: Current state of the CVE
                             enum:
                             - OBSERVED
                             - DEFERRED
                             - FALSE_POSITIVE
                             type: string
                           summary:
-                            description: Short description of the vulnerability
                             type: string
                         required:
                         - cve
                         - severity
                         type: object
+                        x-kubernetes-validations:
+                        - rule: "true"
                       maxItems: 50
                       type: array
                     kernelVersion:
-                      description: Kernel version
                       type: string
                     nodeName:
-                      description: Name of the node
                       type: string
                     osImage:
-                      description: Operating system image
                       type: string
                     scanTime:
-                      description: When the node was scanned
                       format: date-time
                       type: string
                     summary:
-                      description: Vulnerability summary
+                      description: VulnerabilitySummary summarizes vulnerabilities
+                        by severity
                       properties:
                         critical:
-                          description: Critical severity vulnerabilities
+                          description: SeverityCount counts vulnerabilities at a severity
+                            level
                           properties:
                             fixable:
-                              description: Fixable vulnerabilities at this severity
                               type: integer
                             total:
-                              description: Total vulnerabilities at this severity
                               type: integer
                           required:
                           - fixable
                           - total
                           type: object
                         fixableTotal:
-                          description: Total number of fixable vulnerabilities
                           type: integer
                         high:
-                          description: High severity vulnerabilities
+                          description: SeverityCount counts vulnerabilities at a severity
+                            level
                           properties:
                             fixable:
-                              description: Fixable vulnerabilities at this severity
                               type: integer
                             total:
-                              description: Total vulnerabilities at this severity
                               type: integer
                           required:
                           - fixable
                           - total
                           type: object
                         low:
-                          description: Low severity vulnerabilities
+                          description: SeverityCount counts vulnerabilities at a severity
+                            level
                           properties:
                             fixable:
-                              description: Fixable vulnerabilities at this severity
                               type: integer
                             total:
-                              description: Total vulnerabilities at this severity
                               type: integer
                           required:
                           - fixable
                           - total
                           type: object
                         medium:
-                          description: Medium severity vulnerabilities
+                          description: SeverityCount counts vulnerabilities at a severity
+                            level
                           properties:
                             fixable:
-                              description: Fixable vulnerabilities at this severity
                               type: integer
                             total:
-                              description: Total vulnerabilities at this severity
                               type: integer
                           required:
                           - fixable
                           - total
                           type: object
                         total:
-                          description: Total number of vulnerabilities
                           type: integer
                       required:
                       - fixableTotal
@@ -244,15 +234,6 @@ spec:
                   - summary
                   type: object
                 type: array
-            type: object
-          status:
-            description: ClusterSecurityResultsStatus defines the observed state of
-              ClusterSecurityResults
-            properties:
-              lastUpdated:
-                description: Last update time
-                format: date-time
-                type: string
               summary:
                 description: Summary counts across all nodes
                 properties:

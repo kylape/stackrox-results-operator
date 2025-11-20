@@ -223,8 +223,8 @@ make manifests
 make install
 
 # For breaking changes (e.g., scope change), delete and recreate:
-kubectl delete crd alerts.security.stackrox.io
-kubectl apply -f config/crd/bases/security.stackrox.io_alerts.yaml
+kubectl delete crd alerts.results.stackrox.io
+kubectl apply -f config/crd/bases/results.stackrox.io_alerts.yaml
 ```
 
 ### Debug Controller Issues

@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: securityresults.security.stackrox.io
+  name: securityresults.results.stackrox.io
 spec:
-  group: security.stackrox.io
+  group: results.stackrox.io
   names:
     kind: SecurityResults
     listKind: SecurityResultsList

@@ -16,37 +16,12 @@ rules:
 - apiGroups:
   - results.stackrox.io
   resources:
-  - resultsexporters
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - results.stackrox.io
-  resources:
-  - resultsexporters/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - results.stackrox.io
-  resources:
-  - resultsexporters/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - security.stackrox.io
-  resources:
   - alerts
   - clusteralerts
   - clustersecurityresults
   - imagevulnerabilities
   - nodevulnerabilities
+  - resultsexporters
   - securityresults
   verbs:
   - create
@@ -57,15 +32,22 @@ rules:
   - update
   - watch
 - apiGroups:
-  - security.stackrox.io
+  - results.stackrox.io
   resources:
   - alerts/status
   - clusteralerts/status
   - clustersecurityresults/status
   - imagevulnerabilities/status
   - nodevulnerabilities/status
+  - resultsexporters/status
   - securityresults/status
   verbs:
   - get
   - patch
+  - update
+- apiGroups:
+  - results.stackrox.io
+  resources:
+  - resultsexporters/finalizers
+  verbs:
   - update

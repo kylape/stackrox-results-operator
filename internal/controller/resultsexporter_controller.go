@@ -46,18 +46,18 @@ type ResultsExporterReconciler struct {
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=resultsexporters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=resultsexporters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=resultsexporters/finalizers,verbs=update
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=alerts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=alerts/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=clusteralerts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=clusteralerts/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=imagevulnerabilities,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=imagevulnerabilities/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=nodevulnerabilities,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=nodevulnerabilities/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=securityresults,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=securityresults/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=clustersecurityresults,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=security.stackrox.io,resources=clustersecurityresults/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=alerts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=alerts/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=clusteralerts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=clusteralerts/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=imagevulnerabilities,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=imagevulnerabilities/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=nodevulnerabilities,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=nodevulnerabilities/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=securityresults,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=securityresults/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=clustersecurityresults,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=clustersecurityresults/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
@@ -492,15 +492,11 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 				logger.Error(err, "Failed to update SecurityResults status", "namespace", namespace)
 			}
 		} else if err == nil {
-			// Update existing resource
-			sr.ResourceVersion = existing.ResourceVersion
-			if err := r.Update(ctx, sr); err != nil {
-				logger.Error(err, "Failed to update SecurityResults", "namespace", namespace)
-				continue
-			}
-			// Update status subresource
-			if err := r.Status().Update(ctx, sr); err != nil {
+			// Update existing resource - only update status since Spec is empty
+			existing.Status = sr.Status
+			if err := r.Status().Update(ctx, existing); err != nil {
 				logger.Error(err, "Failed to update SecurityResults status", "namespace", namespace)
+				continue
 			}
 			logger.V(1).Info("Updated SecurityResults", "namespace", namespace)
 		} else {
@@ -586,13 +582,9 @@ func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Conte
 			return errors.Wrap(err, "failed to update ClusterSecurityResults status")
 		}
 	} else if err == nil {
-		// Update existing resource
-		csr.ResourceVersion = existing.ResourceVersion
-		if err := r.Update(ctx, csr); err != nil {
-			return errors.Wrap(err, "failed to update ClusterSecurityResults")
-		}
-		// Update status subresource
-		if err := r.Status().Update(ctx, csr); err != nil {
+		// Update existing resource - only update status since Spec is empty
+		existing.Status = csr.Status
+		if err := r.Status().Update(ctx, existing); err != nil {
 			return errors.Wrap(err, "failed to update ClusterSecurityResults status")
 		}
 		logger.Info("Updated ClusterSecurityResults")

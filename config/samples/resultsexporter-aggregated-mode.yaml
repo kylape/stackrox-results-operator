@@ -13,8 +13,9 @@ metadata:
 spec:
   # StackRox Central connection
   central:
-    endpoint: https://central.stackrox.svc:443
+    endpoint: http://mock-central.stackrox.svc:443
     authSecretName: central-auth
+    authSecretNamespace: stackrox
     tlsConfig:
       insecureSkipVerify: true
 

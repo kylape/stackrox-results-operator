@@ -3,11 +3,11 @@
 # It should be run by config/default
 resources:
 - bases/results.stackrox.io_resultsexporters.yaml
-- bases/security.stackrox.io_alerts.yaml
-- bases/security.stackrox.io_imagevulnerabilities.yaml
-- bases/security.stackrox.io_nodevulnerabilities.yaml
-- bases/security.stackrox.io_securityresults.yaml
-- bases/security.stackrox.io_clustersecurityresults.yaml
+- bases/results.stackrox.io_alerts.yaml
+- bases/results.stackrox.io_imagevulnerabilities.yaml
+- bases/results.stackrox.io_nodevulnerabilities.yaml
+- bases/results.stackrox.io_securityresults.yaml
+- bases/results.stackrox.io_clustersecurityresults.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

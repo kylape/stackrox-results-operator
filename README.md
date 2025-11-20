@@ -379,14 +379,14 @@ kubectl get securityresults -A -o json \
 
 ## API Reference
 
-### Individual CRDs (security.stackrox.io/v1alpha1)
+### Individual CRDs (results.stackrox.io/v1alpha1)
 
 * **Alert** (namespaced): Namespace-scoped policy violations (e.g., deployment violations)
 * **ClusterAlert** (cluster-scoped): Cluster-scoped policy violations (e.g., cluster configuration issues)
 * **ImageVulnerability** (cluster-scoped): Container image vulnerabilities
 * **NodeVulnerability** (cluster-scoped): Kubernetes node vulnerabilities
 
-### Aggregated CRDs (security.stackrox.io/v1alpha1)
+### Aggregated CRDs (results.stackrox.io/v1alpha1)
 
 * **SecurityResults** (namespaced): All security findings for a namespace
 * **ClusterSecurityResults** (cluster-scoped): All node vulnerabilities cluster-wide
