@@ -55,6 +55,10 @@ type htpasswdAuthProvider struct {
 	password string
 }
 
+// noAuthProvider implements AuthProvider for unauthenticated requests
+type noAuthProvider struct{}
+
+
 // Config contains configuration for creating a Central client
 type Config struct {
 	Endpoint       string
@@ -118,6 +122,12 @@ func New(ctx context.Context, config Config) (*Client, error) {
 
 // createAuthProvider determines which authentication method to use
 func createAuthProvider(ctx context.Context, config Config, httpClient *http.Client) (AuthProvider, error) {
+	// If no auth secret is configured, use no authentication
+	if config.AuthSecretName == "" {
+		log.Info("No auth secret configured, using unauthenticated requests")
+		return &noAuthProvider{}, nil
+	}
+
 	// Load auth secret
 	secret := &corev1.Secret{}
 	if err := config.K8sClient.Get(ctx, client.ObjectKey{
@@ -250,6 +260,18 @@ func (h *htpasswdAuthProvider) Refresh(ctx context.Context) error {
 	return nil
 }
 
+// No auth implementation
+
+func (n *noAuthProvider) GetAuthHeader(ctx context.Context) (string, error) {
+	// Return empty string for no authentication
+	return "", nil
+}
+
+func (n *noAuthProvider) Refresh(ctx context.Context) error {
+	// No auth doesn't need refresh
+	return nil
+}
+
 // doRequest performs an authenticated HTTP request to Central
 func (c *Client) doRequest(ctx context.Context, method, path string) (*http.Response, error) {
 	url := c.endpoint + path
@@ -265,7 +287,10 @@ func (c *Client) doRequest(ctx context.Context, method, path string) (*http.Resp
 		return nil, errors.Wrap(err, "failed to get auth header")
 	}
 
-	req.Header.Set("Authorization", authHeader)
+	// Only set Authorization header if auth is configured
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)

@@ -224,13 +224,13 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 
 		resp, err := c.doRequest(ctx, "GET", path)
 		if err != nil {
-			log.Error(err, "Failed to list nodes for cluster", "clusterID", cluster.ID)
+			log.Info("Failed to list nodes for cluster", "clusterID", cluster.ID, "error", err.Error())
 			continue // Skip this cluster on error
 		}
 
 		if resp.StatusCode != 200 {
 			body, _ := io.ReadAll(resp.Body)
-			log.Error(errors.New("non-200 status"), "List nodes failed for cluster",
+			log.Info("List nodes failed for cluster",
 				"clusterID", cluster.ID, "status", resp.StatusCode, "body", string(body))
 			resp.Body.Close()
 			continue // Skip this cluster on error
@@ -239,7 +239,7 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			log.Error(err, "Failed to read nodes response body for cluster", "clusterID", cluster.ID)
+			log.Info("Failed to read nodes response body for cluster", "clusterID", cluster.ID, "error", err.Error())
 			continue // Skip this cluster on error
 		}
 
@@ -247,7 +247,7 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 
 		// Use protojson to unmarshal
 		if err := protojson.Unmarshal(body, &nodesResponse); err != nil {
-			log.Error(err, "Failed to parse nodes response for cluster", "clusterID", cluster.ID)
+			log.Info("Failed to parse nodes response for cluster", "clusterID", cluster.ID, "error", err.Error())
 			continue // Skip this cluster on error
 		}
 

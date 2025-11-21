@@ -191,7 +191,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Create Central client
 	centralClient, err := r.createCentralClient(ctx, exporter)
 	if err != nil {
-		logger.Error(err, "Failed to create Central client")
+		logger.Info("Failed to create Central client", "error", err.Error())
 		r.setCondition(exporter, TypeCentralConnected, metav1.ConditionFalse,
 			"ConnectionFailed", fmt.Sprintf("Failed to connect to Central: %v", err))
 		r.setCondition(exporter, TypeReady, metav1.ConditionFalse,
@@ -199,12 +199,12 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if updateErr := r.Status().Update(ctx, exporter); updateErr != nil {
 			logger.Error(updateErr, "Failed to update status")
 		}
-		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		return ctrl.Result{RequeueAfter: 1 * time.Minute}, fmt.Errorf("failed to create Central client")
 	}
 
 	// Test connection
 	if err := centralClient.TestConnection(ctx); err != nil {
-		logger.Error(err, "Central connection test failed")
+		logger.Info("Central connection test failed", "error", err.Error())
 		r.setCondition(exporter, TypeCentralConnected, metav1.ConditionFalse,
 			"ConnectionTestFailed", fmt.Sprintf("Connection test failed: %v", err))
 		r.setCondition(exporter, TypeReady, metav1.ConditionFalse,
@@ -212,7 +212,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if updateErr := r.Status().Update(ctx, exporter); updateErr != nil {
 			logger.Error(updateErr, "Failed to update status")
 		}
-		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		return ctrl.Result{RequeueAfter: 1 * time.Minute}, fmt.Errorf("Central connection test failed")
 	}
 
 	logger.Info("Successfully connected to Central")
@@ -238,7 +238,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	exporter.Status.ObservedGeneration = exporter.Generation
 
 	if syncErr != nil {
-		logger.Error(syncErr, "Sync failed")
+		logger.Info("Sync failed", "error", syncErr.Error())
 		exporter.Status.LastSyncError = syncErr.Error()
 		exporter.Status.ConsecutiveFailures++
 		r.setCondition(exporter, TypeSyncing, metav1.ConditionFalse,
@@ -473,7 +473,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	// Query Central for deployments to determine which images are used in which namespaces
 	deployments, err := centralClient.ListDeployments(ctx)
 	if err != nil {
-		logger.Error(err, "Failed to list deployments from Central")
+		logger.Info("Failed to list deployments from Central", "error", err.Error())
 		// Continue without image filtering
 		deployments = nil
 	}

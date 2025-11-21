@@ -52,12 +52,13 @@ type CentralConfig struct {
 	Endpoint string `json:"endpoint"`
 
 	// Secret containing auth credentials (htpasswd or API token)
-	// +kubebuilder:validation:Required
-	AuthSecretName string `json:"authSecretName"`
+	// When not provided, no authentication header will be sent
+	// +optional
+	AuthSecretName string `json:"authSecretName,omitempty"`
 
 	// Namespace where the auth secret is located
-	// +kubebuilder:validation:Required
-	AuthSecretNamespace string `json:"authSecretNamespace"`
+	// +optional
+	AuthSecretNamespace string `json:"authSecretNamespace,omitempty"`
 
 	// TLS configuration
 	// +optional

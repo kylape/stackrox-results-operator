@@ -46,15 +46,15 @@ echo ""
 QUERY="Cluster:$CLUSTER_NAME"
 ENCODED_QUERY=$(printf %s "$QUERY" | jq -sRr @uri)
 
-# Capture alerts with pagination
-echo "[1/5] Fetching alerts for cluster '$CLUSTER_NAME' (with pagination)..."
-OFFSET=0
-LIMIT=1000
-PAGE_NUM=1
-TEMP_DIR="$OUTPUT_DIR/alert_pages"
+# # Capture alerts with pagination
+# echo "[1/5] Fetching alerts for cluster '$CLUSTER_NAME' (with pagination)..."
+# OFFSET=0
+# LIMIT=1000
+# PAGE_NUM=1
+# TEMP_DIR="$OUTPUT_DIR/alert_pages"
 
-# Create temp directory for page files
-mkdir -p "$TEMP_DIR"
+# # Create temp directory for page files
+# mkdir -p "$TEMP_DIR"
 
 # while true; do
 #     echo "      Fetching page $PAGE_NUM (offset: $OFFSET)..."
@@ -93,54 +93,54 @@ mkdir -p "$TEMP_DIR"
 # ALERT_COUNT=$(jq '.alerts | length' "$OUTPUT_DIR/alerts.json" 2>/dev/null || echo "0")
 # echo "      Total alerts retrieved: $ALERT_COUNT"
 
-# # # Capture images (NDJSON)
-echo "[2/5] Fetching images for cluster '$CLUSTER_NAME' (this may take a while)..."
+# # Capture images (NDJSON)
+# echo "[2/5] Fetching images for cluster '$CLUSTER_NAME' (this may take a while)..."
+# curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
+#   "https://$API_ENDPOINT/v1/export/images?query=$ENCODED_QUERY" \
+#   > "$OUTPUT_DIR/images.ndjson"
+# IMAGE_COUNT=$(wc -l < "$OUTPUT_DIR/images.ndjson" | tr -d ' ')
+# echo "      Retrieved $IMAGE_COUNT images"
+
+# Capture deployments
+echo "[3/5] Fetching deployments for cluster '$CLUSTER_NAME'..."
 curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-  "https://$API_ENDPOINT/v1/export/images?query=$ENCODED_QUERY" \
-  > "$OUTPUT_DIR/images.ndjson"
-IMAGE_COUNT=$(wc -l < "$OUTPUT_DIR/images.ndjson" | tr -d ' ')
-echo "      Retrieved $IMAGE_COUNT images"
+  "https://$API_ENDPOINT/v1/export/deployments?query=$ENCODED_QUERY" \
+  > "$OUTPUT_DIR/deployments.ndjson"
+DEPLOYMENT_COUNT=$(wc -l < "$OUTPUT_DIR/deployments.ndjson" | tr -d ' ')
+echo "      Retrieved $DEPLOYMENT_COUNT deployments"
 
-# # Capture deployments
-# echo "[3/5] Fetching deployments for cluster '$CLUSTER_NAME'..."
-# curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-#   "https://$API_ENDPOINT/v1/export/deployments?query=$ENCODED_QUERY" \
-#   > "$OUTPUT_DIR/deployments.ndjson"
-# DEPLOYMENT_COUNT=$(wc -l < "$OUTPUT_DIR/deployments.ndjson" | tr -d ' ')
-# echo "      Retrieved $DEPLOYMENT_COUNT deployments"
+# Capture clusters
+echo "[4/5] Fetching cluster metadata..."
+curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
+  "https://$API_ENDPOINT/v1/clusters" \
+  | jq --arg filter "$CLUSTER_NAME" '{clusters: [.clusters[] | select(.name == $filter)]}' \
+  > "$OUTPUT_DIR/clusters.json"
+CLUSTER_COUNT=$(jq '.clusters | length' "$OUTPUT_DIR/clusters.json" 2>/dev/null || echo "0")
+echo "      Retrieved $CLUSTER_COUNT cluster(s)"
 
-# # Capture clusters
-# echo "[4/5] Fetching cluster metadata..."
-# curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-#   "https://$API_ENDPOINT/v1/clusters" \
-#   | jq --arg filter "$CLUSTER_NAME" '{clusters: [.clusters[] | select(.name == $filter)]}' \
-#   > "$OUTPUT_DIR/clusters.json"
-# CLUSTER_COUNT=$(jq '.clusters | length' "$OUTPUT_DIR/clusters.json" 2>/dev/null || echo "0")
-# echo "      Retrieved $CLUSTER_COUNT cluster(s)"
+if [ "$CLUSTER_COUNT" = "0" ]; then
+    echo "      Warning: No cluster found with name '$CLUSTER_NAME'"
+    echo "      Creating empty nodes.json"
+    echo '{"nodes":[]}' > "$OUTPUT_DIR/nodes.json"
+    total_nodes=0
+else
+    # Capture nodes for the cluster
+    echo "[5/5] Fetching nodes for cluster '$CLUSTER_NAME'..."
 
-# if [ "$CLUSTER_COUNT" = "0" ]; then
-#     echo "      Warning: No cluster found with name '$CLUSTER_NAME'"
-#     echo "      Creating empty nodes.json"
-#     echo '{"nodes":[]}' > "$OUTPUT_DIR/nodes.json"
-#     total_nodes=0
-# else
-#     # Capture nodes for the cluster
-#     echo "[5/5] Fetching nodes for cluster '$CLUSTER_NAME'..."
+    CLUSTER_ID=$(jq -r '.clusters[0].id' "$OUTPUT_DIR/clusters.json")
 
-#     CLUSTER_ID=$(jq -r '.clusters[0].id' "$OUTPUT_DIR/clusters.json")
+    # Fetch nodes for this cluster
+    nodes_json=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
+        "https://$API_ENDPOINT/v1/nodes/$CLUSTER_ID")
 
-#     # Fetch nodes for this cluster
-#     nodes_json=$(curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-#         "https://$API_ENDPOINT/v1/nodes/$CLUSTER_ID")
+    # Extract nodes array and add clusterId field to each node
+    echo "$nodes_json" | jq --arg cid "$CLUSTER_ID" \
+        '{nodes: [.nodes[]? | . + {clusterId: $cid}]}' \
+        > "$OUTPUT_DIR/nodes.json"
 
-#     # Extract nodes array and add clusterId field to each node
-#     echo "$nodes_json" | jq --arg cid "$CLUSTER_ID" \
-#         '{nodes: [.nodes[]? | . + {clusterId: $cid}]}' \
-#         > "$OUTPUT_DIR/nodes.json"
-
-#     total_nodes=$(jq '.nodes | length' "$OUTPUT_DIR/nodes.json" 2>/dev/null || echo "0")
-#     echo "      Retrieved $total_nodes nodes"
-# fi
+    total_nodes=$(jq '.nodes | length' "$OUTPUT_DIR/nodes.json" 2>/dev/null || echo "0")
+    echo "      Retrieved $total_nodes nodes"
+fi
 
 echo ""
 echo "======================================"
