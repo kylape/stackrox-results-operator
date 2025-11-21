@@ -553,6 +553,9 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 			continue
 		}
 
+		// Enforce limits to prevent exceeding etcd 3MB limit
+		r.enforceAggregatedLimits(ctx, exporter, namespace, status)
+
 		// Calculate summary
 		summary := r.calculateSecurityResultsSummary(status)
 
@@ -1407,6 +1410,84 @@ func (r *ResultsExporterReconciler) cleanupStaleNodeVulnerabilities(ctx context.
 		logger.Info("Cleaned up stale node vulnerabilities", "deletedCount", deletedCount)
 	}
 	return deletedCount, nil
+}
+
+// enforceAggregatedLimits truncates data to prevent exceeding etcd 3MB limit
+func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, namespace string, status *securityv1alpha1.SecurityResultsStatus) {
+	logger := log.FromContext(ctx)
+
+	config := exporter.Spec.Exports
+
+	// Get limits with defaults
+	maxAlerts := 100 // default
+	maxImages := 100 // default
+	maxCVEsTotal := 10000 // default
+
+	if config.Alerts != nil && config.Alerts.MaxPerNamespace > 0 {
+		maxAlerts = config.Alerts.MaxPerNamespace
+	}
+	if config.ImageVulnerabilities != nil && config.ImageVulnerabilities.MaxImagesPerNamespace > 0 {
+		maxImages = config.ImageVulnerabilities.MaxImagesPerNamespace
+	}
+	if config.ImageVulnerabilities != nil && config.ImageVulnerabilities.MaxCVEsPerNamespace > 0 {
+		maxCVEsTotal = config.ImageVulnerabilities.MaxCVEsPerNamespace
+	}
+
+	originalAlertCount := len(status.Alerts)
+	originalImageCount := len(status.ImageVulnerabilities)
+
+	// Truncate alerts
+	if len(status.Alerts) > maxAlerts {
+		status.Alerts = status.Alerts[:maxAlerts]
+		logger.Info("Truncated alerts to prevent etcd limit",
+			"namespace", namespace,
+			"original", originalAlertCount,
+			"truncated", len(status.Alerts))
+	}
+
+	// Truncate images
+	if len(status.ImageVulnerabilities) > maxImages {
+		status.ImageVulnerabilities = status.ImageVulnerabilities[:maxImages]
+		logger.Info("Truncated images to prevent etcd limit",
+			"namespace", namespace,
+			"original", originalImageCount,
+			"truncated", len(status.ImageVulnerabilities))
+	}
+
+	// Count and truncate total CVEs across all images
+	totalCVEs := 0
+	for _, img := range status.ImageVulnerabilities {
+		totalCVEs += len(img.Vulnerabilities)
+	}
+
+	if totalCVEs > maxCVEsTotal {
+		logger.Info("Total CVEs exceeds limit, truncating",
+			"namespace", namespace,
+			"totalCVEs", totalCVEs,
+			"limit", maxCVEsTotal)
+
+		// Truncate CVEs from images until we're under the limit
+		remainingCVEs := maxCVEsTotal
+		for i := range status.ImageVulnerabilities {
+			if remainingCVEs <= 0 {
+				// No more CVEs allowed, clear the rest
+				status.ImageVulnerabilities[i].Vulnerabilities = nil
+				continue
+			}
+
+			if len(status.ImageVulnerabilities[i].Vulnerabilities) > remainingCVEs {
+				status.ImageVulnerabilities[i].Vulnerabilities = status.ImageVulnerabilities[i].Vulnerabilities[:remainingCVEs]
+				remainingCVEs = 0
+			} else {
+				remainingCVEs -= len(status.ImageVulnerabilities[i].Vulnerabilities)
+			}
+		}
+
+		logger.Info("Truncated CVEs to prevent etcd limit",
+			"namespace", namespace,
+			"originalCVEs", totalCVEs,
+			"truncatedCVEs", maxCVEsTotal)
+	}
 }
 
 // setCondition sets a condition on the ResultsExporter status

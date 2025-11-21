@@ -110,8 +110,9 @@ type AlertExportConfig struct {
 	// +optional
 	Filters *AlertFilters `json:"filters,omitempty"`
 
-	// Max alerts per namespace (default: 1000)
-	// +kubebuilder:default:=1000
+	// Max alerts per namespace (default: 100)
+	// Keep this low to avoid hitting etcd 3MB limit in aggregated mode
+	// +kubebuilder:default:=100
 	// +optional
 	MaxPerNamespace int `json:"maxPerNamespace,omitempty"`
 }
@@ -142,10 +143,23 @@ type ImageVulnExportConfig struct {
 	// +optional
 	Filters *VulnFilters `json:"filters,omitempty"`
 
-	// Max images to export (default: 5000)
-	// +kubebuilder:default:=5000
+	// Max images to export globally (default: 1000)
+	// +kubebuilder:default:=1000
 	// +optional
 	MaxImages int `json:"maxImages,omitempty"`
+
+	// Max images per namespace in aggregated mode (default: 100)
+	// Keep this low to avoid hitting etcd 3MB limit
+	// +kubebuilder:default:=100
+	// +optional
+	MaxImagesPerNamespace int `json:"maxImagesPerNamespace,omitempty"`
+
+	// Max total CVEs per namespace in aggregated mode (default: 10000)
+	// Hard cap to prevent exceeding etcd 3MB limit
+	// With 30,000+ CVEs possible in some namespaces, this is critical
+	// +kubebuilder:default:=10000
+	// +optional
+	MaxCVEsPerNamespace int `json:"maxCVEsPerNamespace,omitempty"`
 }
 
 // NodeVulnExportConfig defines node vulnerability export settings
@@ -170,8 +184,9 @@ type VulnFilters struct {
 	// +optional
 	FixableOnly bool `json:"fixableOnly,omitempty"`
 
-	// Max CVEs per image/node (default: 50)
-	// +kubebuilder:default:=50
+	// Max CVEs per image/node (default: 20)
+	// Keep this low to avoid hitting etcd 3MB limit in aggregated mode
+	// +kubebuilder:default:=20
 	// +optional
 	MaxCVEsPerResource int `json:"maxCVEsPerResource,omitempty"`
 }

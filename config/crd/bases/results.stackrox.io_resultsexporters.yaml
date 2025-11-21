@@ -125,8 +125,10 @@ spec:
                             type: string
                         type: object
                       maxPerNamespace:
-                        default: 1000
-                        description: 'Max alerts per namespace (default: 1000)'
+                        default: 100
+                        description: |-
+                          Max alerts per namespace (default: 100)
+                          Keep this low to avoid hitting etcd 3MB limit in aggregated mode
                         type: integer
                     required:
                     - enabled
@@ -145,8 +147,10 @@ spec:
                             description: Only include fixable vulnerabilities
                             type: boolean
                           maxCVEsPerResource:
-                            default: 50
-                            description: 'Max CVEs per image/node (default: 50)'
+                            default: 20
+                            description: |-
+                              Max CVEs per image/node (default: 20)
+                              Keep this low to avoid hitting etcd 3MB limit in aggregated mode
                             type: integer
                           minSeverity:
                             description: Minimum severity (LOW, MEDIUM, HIGH, CRITICAL)
@@ -157,9 +161,22 @@ spec:
                             - CRITICAL
                             type: string
                         type: object
+                      maxCVEsPerNamespace:
+                        default: 10000
+                        description: |-
+                          Max total CVEs per namespace in aggregated mode (default: 10000)
+                          Hard cap to prevent exceeding etcd 3MB limit
+                          With 30,000+ CVEs possible in some namespaces, this is critical
+                        type: integer
                       maxImages:
-                        default: 5000
-                        description: 'Max images to export (default: 5000)'
+                        default: 1000
+                        description: 'Max images to export globally (default: 1000)'
+                        type: integer
+                      maxImagesPerNamespace:
+                        default: 100
+                        description: |-
+                          Max images per namespace in aggregated mode (default: 100)
+                          Keep this low to avoid hitting etcd 3MB limit
                         type: integer
                     required:
                     - enabled
@@ -190,8 +207,10 @@ spec:
                             description: Only include fixable vulnerabilities
                             type: boolean
                           maxCVEsPerResource:
-                            default: 50
-                            description: 'Max CVEs per image/node (default: 50)'
+                            default: 20
+                            description: |-
+                              Max CVEs per image/node (default: 20)
+                              Keep this low to avoid hitting etcd 3MB limit in aggregated mode
                             type: integer
                           minSeverity:
                             description: Minimum severity (LOW, MEDIUM, HIGH, CRITICAL)
