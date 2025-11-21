@@ -1,3 +1,6 @@
 # Data files (not checked in - customer data)
 data/
 results.json
+
+# API tokens (sensitive)
+token
