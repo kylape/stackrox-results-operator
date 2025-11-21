@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -241,7 +242,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Set DataTruncated condition
 	if dataTruncated {
 		r.setCondition(exporter, TypeDataTruncated, metav1.ConditionTrue,
-			"LimitsEnforced", "Data was truncated to prevent exceeding etcd 3MB limit")
+			"LimitsEnforced", "Data truncated in one or more namespaces to prevent exceeding etcd 3MB limit. Check SecurityResults conditions for details.")
 	} else {
 		r.setCondition(exporter, TypeDataTruncated, metav1.ConditionFalse,
 			"NoTruncation", "All data exported without truncation")
@@ -575,7 +576,8 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		}
 
 		// Enforce limits to prevent exceeding etcd 3MB limit
-		if r.enforceAggregatedLimits(ctx, exporter, namespace, status) {
+		truncDetails := r.enforceAggregatedLimits(ctx, exporter, namespace, status)
+		if truncDetails.HasTruncation() {
 			dataTruncated = true
 		}
 
@@ -599,6 +601,15 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 				Summary:              summary,
 				LastUpdated:          &now,
 			},
+		}
+
+		// Set truncation condition on SecurityResults
+		if truncDetails.HasTruncation() {
+			setSecurityResultsCondition(sr, TypeDataTruncated, metav1.ConditionTrue,
+				"LimitsEnforced", truncDetails.FormatMessage())
+		} else {
+			setSecurityResultsCondition(sr, TypeDataTruncated, metav1.ConditionFalse,
+				"NoTruncation", "All data exported without truncation")
 		}
 
 		// Create or update
@@ -1435,9 +1446,45 @@ func (r *ResultsExporterReconciler) cleanupStaleNodeVulnerabilities(ctx context.
 	return deletedCount, nil
 }
 
+// TruncationDetails contains information about data truncation
+type TruncationDetails struct {
+	AlertsOriginal  int
+	AlertsTruncated int
+	ImagesOriginal  int
+	ImagesTruncated int
+	CVEsOriginal    int
+	CVEsTruncated   int
+}
+
+// HasTruncation returns true if any data was truncated
+func (t *TruncationDetails) HasTruncation() bool {
+	return t.AlertsOriginal > t.AlertsTruncated ||
+		t.ImagesOriginal > t.ImagesTruncated ||
+		t.CVEsOriginal > t.CVEsTruncated
+}
+
+// FormatMessage returns a human-readable message describing the truncation
+func (t *TruncationDetails) FormatMessage() string {
+	if !t.HasTruncation() {
+		return "All data exported without truncation"
+	}
+
+	var parts []string
+	if t.AlertsOriginal > t.AlertsTruncated {
+		parts = append(parts, fmt.Sprintf("alerts (%d→%d)", t.AlertsOriginal, t.AlertsTruncated))
+	}
+	if t.ImagesOriginal > t.ImagesTruncated {
+		parts = append(parts, fmt.Sprintf("images (%d→%d)", t.ImagesOriginal, t.ImagesTruncated))
+	}
+	if t.CVEsOriginal > t.CVEsTruncated {
+		parts = append(parts, fmt.Sprintf("CVEs (%d→%d)", t.CVEsOriginal, t.CVEsTruncated))
+	}
+	return fmt.Sprintf("Truncated to prevent etcd 3MB limit: %s", strings.Join(parts, ", "))
+}
+
 // enforceAggregatedLimits truncates data to prevent exceeding etcd 3MB limit
-// Returns true if any truncation occurred
-func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, namespace string, status *securityv1alpha1.SecurityResultsStatus) bool {
+// Returns truncation details
+func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, namespace string, status *securityv1alpha1.SecurityResultsStatus) *TruncationDetails {
 	logger := log.FromContext(ctx)
 
 	config := exporter.Spec.Exports
@@ -1457,35 +1504,37 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 		maxCVEsTotal = config.ImageVulnerabilities.MaxCVEsPerNamespace
 	}
 
-	originalAlertCount := len(status.Alerts)
-	originalImageCount := len(status.ImageVulnerabilities)
-	truncated := false
+	details := &TruncationDetails{
+		AlertsOriginal:  len(status.Alerts),
+		ImagesOriginal:  len(status.ImageVulnerabilities),
+	}
 
 	// Truncate alerts
 	if len(status.Alerts) > maxAlerts {
 		status.Alerts = status.Alerts[:maxAlerts]
 		logger.Info("Truncated alerts to prevent etcd limit",
 			"namespace", namespace,
-			"original", originalAlertCount,
+			"original", details.AlertsOriginal,
 			"truncated", len(status.Alerts))
-		truncated = true
 	}
+	details.AlertsTruncated = len(status.Alerts)
 
 	// Truncate images
 	if len(status.ImageVulnerabilities) > maxImages {
 		status.ImageVulnerabilities = status.ImageVulnerabilities[:maxImages]
 		logger.Info("Truncated images to prevent etcd limit",
 			"namespace", namespace,
-			"original", originalImageCount,
+			"original", details.ImagesOriginal,
 			"truncated", len(status.ImageVulnerabilities))
-		truncated = true
 	}
+	details.ImagesTruncated = len(status.ImageVulnerabilities)
 
 	// Count and truncate total CVEs across all images
 	totalCVEs := 0
 	for _, img := range status.ImageVulnerabilities {
 		totalCVEs += len(img.CVEs)
 	}
+	details.CVEsOriginal = totalCVEs
 
 	if totalCVEs > maxCVEsTotal {
 		logger.Info("Total CVEs exceeds limit, truncating",
@@ -1514,10 +1563,12 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 			"namespace", namespace,
 			"originalCVEs", totalCVEs,
 			"truncatedCVEs", maxCVEsTotal)
-		truncated = true
+		details.CVEsTruncated = maxCVEsTotal
+	} else {
+		details.CVEsTruncated = totalCVEs
 	}
 
-	return truncated
+	return details
 }
 
 // setCondition sets a condition on the ResultsExporter status
@@ -1532,6 +1583,20 @@ func (r *ResultsExporterReconciler) setCondition(exporter *resultsv1alpha1.Resul
 	}
 
 	meta.SetStatusCondition(&exporter.Status.Conditions, condition)
+}
+
+// setSecurityResultsCondition sets a condition on SecurityResults status
+func setSecurityResultsCondition(sr *securityv1alpha1.SecurityResults, conditionType string, status metav1.ConditionStatus, reason, message string) {
+	condition := metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: sr.Generation,
+	}
+
+	meta.SetStatusCondition(&sr.Status.Conditions, condition)
 }
 
 // SetupWithManager sets up the controller with the Manager.

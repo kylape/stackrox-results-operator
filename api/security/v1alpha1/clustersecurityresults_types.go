@@ -64,6 +64,16 @@ type ClusterSecurityResultsStatus struct {
 	// Last update time
 	// +optional
 	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+
+	// Conditions represent the current state of the ClusterSecurityResults
+	//
+	// Condition types:
+	// - "DataTruncated": indicates if data was truncated to stay within limits
+	//
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // ClusterSecuritySummary provides cluster-wide statistics
