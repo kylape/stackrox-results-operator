@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/stackrox/rox/generated/storage"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/protojson"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -122,37 +124,90 @@ func (c *Client) ListAlerts(ctx context.Context, opts ListAlertsOptions) ([]*sto
 	return alerts, nil
 }
 
-// ListAllAlerts fetches all alerts from Central using pagination
-// It automatically handles the 1000-alert limit by making multiple API calls
+// ListAllAlerts fetches all alerts from Central using concurrent pagination
+// It automatically handles the 1000-alert limit by making multiple API calls in parallel
 func (c *Client) ListAllAlerts(ctx context.Context, opts ListAlertsOptions) ([]*storage.ListAlert, error) {
-	const pageSize = 1000 // Central's maximum page size
+	const pageSize = 1000
+	const maxConcurrency = 5
+	const maxPages = 20 // Support up to 20k alerts
 
-	// Override limit and offset - we'll handle pagination ourselves
-	opts.Limit = pageSize
-	opts.Offset = 0
-
-	var allAlerts []*storage.ListAlert
-
-	for {
-		log.V(1).Info("Fetching alerts page", "offset", opts.Offset, "limit", opts.Limit)
-
-		alerts, err := c.ListAlerts(ctx, opts)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to fetch alerts at offset %d", opts.Offset)
-		}
-
-		allAlerts = append(allAlerts, alerts...)
-
-		// If we got fewer results than the page size, we've reached the end
-		if len(alerts) < pageSize {
-			break
-		}
-
-		// Move to next page
-		opts.Offset += pageSize
+	type pageResult struct {
+		alerts []*storage.ListAlert
+		done   bool
 	}
 
-	log.Info("Retrieved all alerts from Central", "totalCount", len(allAlerts))
+	results := make([]*pageResult, maxPages)
+	var mu sync.Mutex
+
+	eg, ctx := errgroup.WithContext(ctx)
+
+	// Spawn workers for each page
+	for page := 0; page < maxPages; page++ {
+		page := page // capture
+		offset := page * pageSize
+
+		eg.Go(func() error {
+			pageOpts := opts
+			pageOpts.Offset = offset
+			pageOpts.Limit = pageSize
+
+			log.V(1).Info("Fetching alerts page", "offset", offset, "limit", pageSize)
+
+			alerts, err := c.ListAlerts(ctx, pageOpts)
+			if err != nil {
+				return errors.Wrapf(err, "failed to fetch alerts at offset %d", offset)
+			}
+
+			mu.Lock()
+			results[page] = &pageResult{
+				alerts: alerts,
+				done:   len(alerts) < pageSize,
+			}
+			mu.Unlock()
+
+			return nil
+		})
+
+		// Limit concurrency - wait after spawning maxConcurrency workers
+		if (page+1)%maxConcurrency == 0 {
+			if err := eg.Wait(); err != nil {
+				return nil, err
+			}
+
+			// Check if we're done (got a short page)
+			mu.Lock()
+			shouldStop := false
+			for i := 0; i <= page; i++ {
+				if results[i] != nil && results[i].done {
+					shouldStop = true
+					break
+				}
+			}
+			mu.Unlock()
+
+			if shouldStop {
+				break
+			}
+		}
+	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Combine results in order
+	var allAlerts []*storage.ListAlert
+	for _, result := range results {
+		if result == nil {
+			break
+		}
+		allAlerts = append(allAlerts, result.alerts...)
+		if result.done {
+			break
+		}
+	}
+
+	log.Info("Retrieved all alerts from Central (concurrent)", "totalCount", len(allAlerts))
 	return allAlerts, nil
 }
 
