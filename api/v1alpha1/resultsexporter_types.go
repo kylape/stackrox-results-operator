@@ -215,7 +215,7 @@ type ResultsExporterStatus struct {
 
 	// Observed generation
 	// +optional
-	ObservedGeneration int `json:"observedGeneration,omitempty"`
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // ExportedResourceCounts tracks how many resources have been exported
