@@ -48,14 +48,6 @@ type AlertEntity struct {
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 
-	// Cluster name
-	// +optional
-	ClusterName string `json:"clusterName,omitempty"`
-
-	// Cluster ID
-	// +optional
-	ClusterID string `json:"clusterId,omitempty"`
-
 	// Resource type (for Resource entities - e.g., "Secret", "ConfigMap")
 	// +optional
 	ResourceType string `json:"resourceType,omitempty"`

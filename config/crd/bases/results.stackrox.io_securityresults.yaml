@@ -77,12 +77,6 @@ spec:
                       description: AlertEntity describes the Kubernetes entity that
                         violated the policy
                       properties:
-                        clusterId:
-                          description: Cluster ID
-                          type: string
-                        clusterName:
-                          description: Cluster name
-                          type: string
                         id:
                           description: Entity ID
                           type: string
@@ -255,8 +249,6 @@ spec:
                             - OBSERVED
                             - DEFERRED
                             - FALSE_POSITIVE
-                            type: string
-                          summary:
                             type: string
                         required:
                         - cve

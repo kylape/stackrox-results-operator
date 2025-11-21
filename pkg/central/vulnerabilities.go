@@ -321,7 +321,6 @@ func ConvertImageToCRD(img *storage.Image, exporterName string) *securityv1alpha
 				if _, exists := allCVEs[cveID]; !exists {
 					cve := securityv1alpha1.CVE{
 						CVE:      cveID,
-						Summary:  vuln.GetSummary(),
 						Link:     vuln.GetLink(),
 						Severity: convertStorageSeverity(vuln.GetSeverity()),
 						Component: &securityv1alpha1.Component{

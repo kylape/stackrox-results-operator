@@ -140,8 +140,6 @@ spec:
                       - DEFERRED
                       - FALSE_POSITIVE
                       type: string
-                    summary:
-                      type: string
                   required:
                   - cve
                   - severity
