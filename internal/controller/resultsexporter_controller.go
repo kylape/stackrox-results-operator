@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -45,6 +46,11 @@ import (
 type ResultsExporterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// Simple alert cache with TTL
+	cachedAlerts     []*storage.ListAlert
+	cachedAlertsTime time.Time
+	alertCacheMutex  sync.RWMutex
 }
 
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=resultsexporters,verbs=get;list;watch;create;update;patch;delete
@@ -140,8 +146,14 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Always sync if generation changed (spec changed)
 	if exporter.Status.ObservedGeneration != exporter.Generation {
+		// Invalidate alert cache since filters may have changed
+		r.alertCacheMutex.Lock()
+		r.cachedAlerts = nil
+		r.cachedAlertsTime = time.Time{}
+		r.alertCacheMutex.Unlock()
+
 		needsSync = true
-		logger.Info("Spec changed, sync needed",
+		logger.Info("Spec changed, invalidating cache and syncing",
 			"generation", exporter.Generation,
 			"observedGeneration", exporter.Status.ObservedGeneration)
 	} else if exporter.Status.LastSuccessfulSync == nil {
@@ -319,6 +331,39 @@ func (r *ResultsExporterReconciler) createCentralClient(ctx context.Context, exp
 	return central.New(ctx, config)
 }
 
+// getCachedAlerts returns cached alerts if fresh, otherwise fetches from Central
+func (r *ResultsExporterReconciler) getCachedAlerts(ctx context.Context, client *central.Client, opts central.ListAlertsOptions) ([]*storage.ListAlert, error) {
+	const cacheTTL = 5 * time.Minute
+	logger := log.FromContext(ctx)
+
+	// Check cache with read lock
+	r.alertCacheMutex.RLock()
+	if time.Since(r.cachedAlertsTime) < cacheTTL && len(r.cachedAlerts) > 0 {
+		alerts := r.cachedAlerts
+		age := time.Since(r.cachedAlertsTime)
+		r.alertCacheMutex.RUnlock()
+		logger.Info("Using cached alerts", "count", len(alerts), "age", age)
+		return alerts, nil
+	}
+	r.alertCacheMutex.RUnlock()
+
+	// Cache miss - fetch fresh (no lock held during fetch!)
+	logger.Info("Cache miss, fetching alerts from Central")
+	alerts, err := client.ListAllAlerts(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update cache with write lock
+	r.alertCacheMutex.Lock()
+	r.cachedAlerts = alerts
+	r.cachedAlertsTime = time.Now()
+	r.alertCacheMutex.Unlock()
+
+	logger.Info("Cached fresh alerts", "count", len(alerts))
+	return alerts, nil
+}
+
 // syncData syncs data from Central based on the export mode
 // Returns (counts, dataTruncated, error)
 func (r *ResultsExporterReconciler) syncData(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client) (*resultsv1alpha1.ExportedResourceCounts, bool, error) {
@@ -440,11 +485,11 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		}
 
 		var err error
-		alerts, err = centralClient.ListAllAlerts(ctx, opts)
+		alerts, err = r.getCachedAlerts(ctx, centralClient, opts)
 		if err != nil {
 			return false, errors.Wrap(err, "failed to list all alerts")
 		}
-		logger.Info("Retrieved all alerts from Central (with pagination)", "count", len(alerts))
+		logger.Info("Retrieved all alerts (possibly from cache)", "count", len(alerts))
 	}
 
 	// Fetch image vulnerabilities from Central
@@ -991,13 +1036,13 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 		opts.LifecycleStages = config.Filters.LifecycleStages
 	}
 
-	// Fetch alerts from Central (with automatic pagination)
-	alerts, err := centralClient.ListAllAlerts(ctx, opts)
+	// Fetch alerts from Central (with automatic pagination and caching)
+	alerts, err := r.getCachedAlerts(ctx, centralClient, opts)
 	if err != nil {
-		return 0, errors.Wrap(err, "failed to list all alerts from Central")
+		return 0, errors.Wrap(err, "failed to list all alerts")
 	}
 
-	logger.Info("Retrieved all alerts from Central (with pagination)", "count", len(alerts))
+	logger.Info("Retrieved all alerts (possibly from cache)", "count", len(alerts))
 
 	// Track current alert IDs for cleanup
 	currentAlertIDs := make(map[string]bool)
