@@ -69,6 +69,7 @@ const (
 	TypeReady            = "Ready"
 	TypeCentralConnected = "CentralConnected"
 	TypeSyncing          = "Syncing"
+	TypeDataTruncated    = "DataTruncated"
 
 	// Finalizer name
 	finalizerName = "results.stackrox.io/cleanup"
@@ -230,12 +231,21 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Perform sync based on mode
-	exportCounts, syncErr := r.syncData(ctx, exporter, centralClient)
+	exportCounts, dataTruncated, syncErr := r.syncData(ctx, exporter, centralClient)
 
 	// Update status after sync
 	syncDuration := time.Since(syncStartTime)
 	exporter.Status.SyncDuration = &metav1.Duration{Duration: syncDuration}
 	exporter.Status.ObservedGeneration = exporter.Generation
+
+	// Set DataTruncated condition
+	if dataTruncated {
+		r.setCondition(exporter, TypeDataTruncated, metav1.ConditionTrue,
+			"LimitsEnforced", "Data was truncated to prevent exceeding etcd 3MB limit")
+	} else {
+		r.setCondition(exporter, TypeDataTruncated, metav1.ConditionFalse,
+			"NoTruncation", "All data exported without truncation")
+	}
 
 	if syncErr != nil {
 		logger.Info("Sync failed", "error", syncErr.Error())
@@ -250,7 +260,8 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			"duration", syncDuration,
 			"alerts", exportCounts.Alerts,
 			"images", exportCounts.ImageVulnerabilities,
-			"nodes", exportCounts.NodeVulnerabilities)
+			"nodes", exportCounts.NodeVulnerabilities,
+			"dataTruncated", dataTruncated)
 
 		exporter.Status.LastSuccessfulSync = &metav1.Time{Time: syncStartTime}
 		exporter.Status.LastSyncError = ""
@@ -308,7 +319,8 @@ func (r *ResultsExporterReconciler) createCentralClient(ctx context.Context, exp
 }
 
 // syncData syncs data from Central based on the export mode
-func (r *ResultsExporterReconciler) syncData(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client) (*resultsv1alpha1.ExportedResourceCounts, error) {
+// Returns (counts, dataTruncated, error)
+func (r *ResultsExporterReconciler) syncData(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client) (*resultsv1alpha1.ExportedResourceCounts, bool, error) {
 	mode := exporter.Spec.Exports.Mode
 	if mode == "" {
 		mode = "individual" // default
@@ -319,22 +331,23 @@ func (r *ResultsExporterReconciler) syncData(ctx context.Context, exporter *resu
 	// Sync based on mode
 	switch mode {
 	case "individual":
-		return r.syncIndividualMode(ctx, exporter, centralClient)
+		c, err := r.syncIndividualMode(ctx, exporter, centralClient)
+		return c, false, err // individual mode doesn't truncate
 	case "aggregated":
 		return r.syncAggregatedMode(ctx, exporter, centralClient)
 	case "both":
 		// Sync both modes
 		individualCounts, err1 := r.syncIndividualMode(ctx, exporter, centralClient)
-		_, err2 := r.syncAggregatedMode(ctx, exporter, centralClient)
+		_, dataTruncated, err2 := r.syncAggregatedMode(ctx, exporter, centralClient)
 
 		if err1 != nil || err2 != nil {
-			return counts, errors.Errorf("sync errors - individual: %v, aggregated: %v", err1, err2)
+			return counts, false, errors.Errorf("sync errors - individual: %v, aggregated: %v", err1, err2)
 		}
 
 		// Use individual counts for status (they're more detailed)
-		return individualCounts, nil
+		return individualCounts, dataTruncated, nil
 	default:
-		return counts, errors.Errorf("unknown export mode: %s", mode)
+		return counts, false, errors.Errorf("unknown export mode: %s", mode)
 	}
 }
 
@@ -376,32 +389,39 @@ func (r *ResultsExporterReconciler) syncIndividualMode(ctx context.Context, expo
 }
 
 // syncAggregatedMode syncs data in aggregated CRD mode
-func (r *ResultsExporterReconciler) syncAggregatedMode(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client) (*resultsv1alpha1.ExportedResourceCounts, error) {
+func (r *ResultsExporterReconciler) syncAggregatedMode(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client) (*resultsv1alpha1.ExportedResourceCounts, bool, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Syncing in aggregated mode")
 
 	counts := &resultsv1alpha1.ExportedResourceCounts{}
+	dataTruncated := false
 
 	// 1. Sync SecurityResults (namespace-scoped: alerts + image vulns)
-	if err := r.syncSecurityResults(ctx, exporter, centralClient, counts); err != nil {
-		return counts, errors.Wrap(err, "failed to sync SecurityResults")
+	truncated, err := r.syncSecurityResults(ctx, exporter, centralClient, counts)
+	if err != nil {
+		return counts, false, errors.Wrap(err, "failed to sync SecurityResults")
+	}
+	if truncated {
+		dataTruncated = true
 	}
 
 	// 2. Sync ClusterSecurityResults (cluster-scoped: node vulns)
 	if err := r.syncClusterSecurityResults(ctx, exporter, centralClient, counts); err != nil {
-		return counts, errors.Wrap(err, "failed to sync ClusterSecurityResults")
+		return counts, dataTruncated, errors.Wrap(err, "failed to sync ClusterSecurityResults")
 	}
 
 	logger.Info("Completed aggregated mode sync",
 		"alerts", counts.Alerts,
 		"imageVulns", counts.ImageVulnerabilities,
-		"nodeVulns", counts.NodeVulnerabilities)
+		"nodeVulns", counts.NodeVulnerabilities,
+		"dataTruncated", dataTruncated)
 
-	return counts, nil
+	return counts, dataTruncated, nil
 }
 
 // syncSecurityResults creates/updates SecurityResults CRs (one per namespace)
-func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client, counts *resultsv1alpha1.ExportedResourceCounts) error {
+// Returns (dataTruncated, error) where dataTruncated indicates if any data was truncated
+func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client, counts *resultsv1alpha1.ExportedResourceCounts) (bool, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Syncing SecurityResults")
 
@@ -421,7 +441,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		var err error
 		alerts, err = centralClient.ListAllAlerts(ctx, opts)
 		if err != nil {
-			return errors.Wrap(err, "failed to list all alerts")
+			return false, errors.Wrap(err, "failed to list all alerts")
 		}
 		logger.Info("Retrieved all alerts from Central (with pagination)", "count", len(alerts))
 	}
@@ -442,7 +462,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		var err error
 		images, err = centralClient.ListImages(ctx, opts)
 		if err != nil {
-			return errors.Wrap(err, "failed to list image vulnerabilities")
+			return false, errors.Wrap(err, "failed to list image vulnerabilities")
 		}
 		logger.Info("Retrieved image vulnerabilities from Central", "count", len(images))
 	}
@@ -538,6 +558,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 
 	// Create/update SecurityResults CR for each namespace
 	now := metav1.Now()
+	dataTruncated := false
 	for namespace, status := range namespaceData {
 		// Check if namespace exists first
 		ns := &corev1.Namespace{}
@@ -554,7 +575,9 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		}
 
 		// Enforce limits to prevent exceeding etcd 3MB limit
-		r.enforceAggregatedLimits(ctx, exporter, namespace, status)
+		if r.enforceAggregatedLimits(ctx, exporter, namespace, status) {
+			dataTruncated = true
+		}
 
 		// Calculate summary
 		summary := r.calculateSecurityResultsSummary(status)
@@ -609,7 +632,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	}
 
 	logger.Info("Synced SecurityResults", "namespaces", len(namespaceData))
-	return nil
+	return dataTruncated, nil
 }
 
 // syncClusterSecurityResults creates/updates the ClusterSecurityResults CR
@@ -1413,7 +1436,8 @@ func (r *ResultsExporterReconciler) cleanupStaleNodeVulnerabilities(ctx context.
 }
 
 // enforceAggregatedLimits truncates data to prevent exceeding etcd 3MB limit
-func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, namespace string, status *securityv1alpha1.SecurityResultsStatus) {
+// Returns true if any truncation occurred
+func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, namespace string, status *securityv1alpha1.SecurityResultsStatus) bool {
 	logger := log.FromContext(ctx)
 
 	config := exporter.Spec.Exports
@@ -1435,6 +1459,7 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 
 	originalAlertCount := len(status.Alerts)
 	originalImageCount := len(status.ImageVulnerabilities)
+	truncated := false
 
 	// Truncate alerts
 	if len(status.Alerts) > maxAlerts {
@@ -1443,6 +1468,7 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 			"namespace", namespace,
 			"original", originalAlertCount,
 			"truncated", len(status.Alerts))
+		truncated = true
 	}
 
 	// Truncate images
@@ -1452,12 +1478,13 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 			"namespace", namespace,
 			"original", originalImageCount,
 			"truncated", len(status.ImageVulnerabilities))
+		truncated = true
 	}
 
 	// Count and truncate total CVEs across all images
 	totalCVEs := 0
 	for _, img := range status.ImageVulnerabilities {
-		totalCVEs += len(img.Vulnerabilities)
+		totalCVEs += len(img.CVEs)
 	}
 
 	if totalCVEs > maxCVEsTotal {
@@ -1471,15 +1498,15 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 		for i := range status.ImageVulnerabilities {
 			if remainingCVEs <= 0 {
 				// No more CVEs allowed, clear the rest
-				status.ImageVulnerabilities[i].Vulnerabilities = nil
+				status.ImageVulnerabilities[i].CVEs = nil
 				continue
 			}
 
-			if len(status.ImageVulnerabilities[i].Vulnerabilities) > remainingCVEs {
-				status.ImageVulnerabilities[i].Vulnerabilities = status.ImageVulnerabilities[i].Vulnerabilities[:remainingCVEs]
+			if len(status.ImageVulnerabilities[i].CVEs) > remainingCVEs {
+				status.ImageVulnerabilities[i].CVEs = status.ImageVulnerabilities[i].CVEs[:remainingCVEs]
 				remainingCVEs = 0
 			} else {
-				remainingCVEs -= len(status.ImageVulnerabilities[i].Vulnerabilities)
+				remainingCVEs -= len(status.ImageVulnerabilities[i].CVEs)
 			}
 		}
 
@@ -1487,7 +1514,10 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 			"namespace", namespace,
 			"originalCVEs", totalCVEs,
 			"truncatedCVEs", maxCVEsTotal)
+		truncated = true
 	}
+
+	return truncated
 }
 
 // setCondition sets a condition on the ResultsExporter status
