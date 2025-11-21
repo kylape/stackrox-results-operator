@@ -93,26 +93,36 @@ func CreateNamespaces(ctx context.Context, kubeClient kubernetes.Interface, aler
 		log.Printf("Found %d additional unique namespaces in %d deployments", len(namespaces)-deploymentCount, deploymentCount)
 	}
 
-	log.Printf("Total %d unique namespaces to create", len(namespaces))
+	log.Printf("Total %d unique namespaces needed", len(namespaces))
 
-	// Create each namespace
-	created := 0
-	existing := 0
+	// Fetch all existing namespaces in a single API call
+	log.Printf("Fetching existing namespaces...")
+	existingNsList, err := kubeClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list existing namespaces: %w", err)
+	}
+
+	// Build set of existing namespaces
+	existingNamespaces := make(map[string]bool)
+	for _, ns := range existingNsList.Items {
+		existingNamespaces[ns.Name] = true
+	}
+	log.Printf("Found %d existing namespaces", len(existingNamespaces))
+
+	// Compute which namespaces need to be created
+	namespacesToCreate := make([]string, 0)
 	for ns := range namespaces {
-		// Check if namespace already exists
-		_, err := kubeClient.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
-		if err == nil {
-			log.Printf("Namespace already exists: %s", ns)
-			existing++
-			continue
+		if !existingNamespaces[ns] {
+			namespacesToCreate = append(namespacesToCreate, ns)
 		}
+	}
 
-		if !errors.IsNotFound(err) {
-			log.Printf("Error checking namespace %s: %v", ns, err)
-			continue
-		}
+	log.Printf("Need to create %d namespaces", len(namespacesToCreate))
 
-		// Create namespace
+	// Create missing namespaces
+	created := 0
+	failed := 0
+	for _, ns := range namespacesToCreate {
 		namespace := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: ns,
@@ -124,13 +134,14 @@ func CreateNamespaces(ctx context.Context, kubeClient kubernetes.Interface, aler
 
 		if _, err := kubeClient.CoreV1().Namespaces().Create(ctx, namespace, metav1.CreateOptions{}); err != nil {
 			log.Printf("Error creating namespace %s: %v", ns, err)
+			failed++
 			continue
 		}
 
-		log.Printf("Created namespace: %s", ns)
 		created++
 	}
 
-	log.Printf("Namespace creation complete: %d created, %d already existing, %d total", created, existing, len(namespaces))
+	existing := len(namespaces) - len(namespacesToCreate)
+	log.Printf("Namespace creation complete: %d created, %d failed, %d already existing, %d total", created, failed, existing, len(namespaces))
 	return nil
 }
