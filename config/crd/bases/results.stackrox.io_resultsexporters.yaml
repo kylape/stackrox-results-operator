@@ -314,7 +314,6 @@ spec:
                 type: string
               observedGeneration:
                 description: Observed generation
-                format: int64
                 type: integer
               syncDuration:
                 description: Sync duration
