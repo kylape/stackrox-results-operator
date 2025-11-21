@@ -419,11 +419,11 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		}
 
 		var err error
-		alerts, err = centralClient.ListAlerts(ctx, opts)
+		alerts, err = centralClient.ListAllAlerts(ctx, opts)
 		if err != nil {
-			return errors.Wrap(err, "failed to list alerts")
+			return errors.Wrap(err, "failed to list all alerts")
 		}
-		logger.Info("Retrieved alerts from Central", "count", len(alerts))
+		logger.Info("Retrieved all alerts from Central (with pagination)", "count", len(alerts))
 	}
 
 	// Fetch image vulnerabilities from Central
@@ -740,24 +740,20 @@ func (r *ResultsExporterReconciler) convertAlertToAlertData(alert *storage.ListA
 	// Convert entity from ListAlert
 	if deployment := alert.GetDeployment(); deployment != nil {
 		alertData.Entity = &securityv1alpha1.AlertEntity{
-			Type:        "DEPLOYMENT",
-			ID:          deployment.GetId(),
-			Name:        deployment.GetName(),
-			Namespace:   deployment.GetNamespace(),
-			ClusterName: deployment.GetClusterName(),
-			ClusterID:   deployment.GetClusterId(),
+			Type:      "DEPLOYMENT",
+			ID:        deployment.GetId(),
+			Name:      deployment.GetName(),
+			Namespace: deployment.GetNamespace(),
 		}
 	} else if resource := alert.GetResource(); resource != nil {
 		alertData.Entity = &securityv1alpha1.AlertEntity{
 			Name: resource.GetName(),
 		}
-		// Get cluster/namespace/resource type from common entity info
+		// Get namespace/resource type from common entity info
 		if common != nil {
 			alertData.Entity.ResourceType = common.GetResourceType().String()
 			alertData.Entity.Type = common.GetResourceType().String()
 			alertData.Entity.Namespace = common.GetNamespace()
-			alertData.Entity.ClusterID = common.GetClusterId()
-			alertData.Entity.ClusterName = common.GetClusterName()
 		}
 	}
 
@@ -958,13 +954,13 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 		opts.LifecycleStages = config.Filters.LifecycleStages
 	}
 
-	// Fetch alerts from Central
-	alerts, err := centralClient.ListAlerts(ctx, opts)
+	// Fetch alerts from Central (with automatic pagination)
+	alerts, err := centralClient.ListAllAlerts(ctx, opts)
 	if err != nil {
-		return 0, errors.Wrap(err, "failed to list alerts from Central")
+		return 0, errors.Wrap(err, "failed to list all alerts from Central")
 	}
 
-	logger.Info("Retrieved alerts from Central", "count", len(alerts))
+	logger.Info("Retrieved all alerts from Central (with pagination)", "count", len(alerts))
 
 	// Track current alert IDs for cleanup
 	currentAlertIDs := make(map[string]bool)

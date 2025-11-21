@@ -27,8 +27,10 @@ type ListAlertsOptions struct {
 	LifecycleStages []string
 	// Exclude resolved alerts
 	ExcludeResolved bool
-	// Limit number of results
+	// Limit number of results (max 1000 per Central API)
 	Limit int
+	// Offset for pagination
+	Offset int
 }
 
 // ListAlerts fetches alerts from Central
@@ -68,6 +70,10 @@ func (c *Client) ListAlerts(ctx context.Context, opts ListAlertsOptions) ([]*sto
 
 	if opts.Limit > 0 {
 		query.Set("pagination.limit", fmt.Sprintf("%d", opts.Limit))
+	}
+
+	if opts.Offset > 0 {
+		query.Set("pagination.offset", fmt.Sprintf("%d", opts.Offset))
 	}
 
 	// Make request
@@ -114,6 +120,40 @@ func (c *Client) ListAlerts(ctx context.Context, opts ListAlertsOptions) ([]*sto
 
 	log.Info("Retrieved alerts from Central", "count", len(alerts))
 	return alerts, nil
+}
+
+// ListAllAlerts fetches all alerts from Central using pagination
+// It automatically handles the 1000-alert limit by making multiple API calls
+func (c *Client) ListAllAlerts(ctx context.Context, opts ListAlertsOptions) ([]*storage.ListAlert, error) {
+	const pageSize = 1000 // Central's maximum page size
+
+	// Override limit and offset - we'll handle pagination ourselves
+	opts.Limit = pageSize
+	opts.Offset = 0
+
+	var allAlerts []*storage.ListAlert
+
+	for {
+		log.V(1).Info("Fetching alerts page", "offset", opts.Offset, "limit", opts.Limit)
+
+		alerts, err := c.ListAlerts(ctx, opts)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to fetch alerts at offset %d", opts.Offset)
+		}
+
+		allAlerts = append(allAlerts, alerts...)
+
+		// If we got fewer results than the page size, we've reached the end
+		if len(alerts) < pageSize {
+			break
+		}
+
+		// Move to next page
+		opts.Offset += pageSize
+	}
+
+	log.Info("Retrieved all alerts from Central", "totalCount", len(allAlerts))
+	return allAlerts, nil
 }
 
 // GetAlert fetches a single alert by ID
@@ -183,24 +223,20 @@ func ConvertListAlertToCRD(a *storage.ListAlert, exporterName string) *securityv
 	// Entity information from ListAlert
 	if deployment := a.GetDeployment(); deployment != nil {
 		alert.Status.Entity = &securityv1alpha1.AlertEntity{
-			Type:        "DEPLOYMENT",
-			ID:          deployment.GetId(),
-			Name:        deployment.GetName(),
-			Namespace:   deployment.GetNamespace(),
-			ClusterID:   deployment.GetClusterId(),
-			ClusterName: deployment.GetClusterName(),
+			Type:      "DEPLOYMENT",
+			ID:        deployment.GetId(),
+			Name:      deployment.GetName(),
+			Namespace: deployment.GetNamespace(),
 		}
 	} else if resource := a.GetResource(); resource != nil {
 		alert.Status.Entity = &securityv1alpha1.AlertEntity{
 			Name: resource.GetName(),
 		}
-		// Get cluster/namespace/resource type from common entity info
+		// Get namespace/resource type from common entity info
 		if common != nil {
 			alert.Status.Entity.ResourceType = common.GetResourceType().String()
 			alert.Status.Entity.Type = common.GetResourceType().String()
 			alert.Status.Entity.Namespace = common.GetNamespace()
-			alert.Status.Entity.ClusterID = common.GetClusterId()
-			alert.Status.Entity.ClusterName = common.GetClusterName()
 		}
 	}
 
@@ -265,24 +301,20 @@ func ConvertListAlertToClusterCRD(a *storage.ListAlert, exporterName string) *se
 	// Entity information
 	if deployment := a.GetDeployment(); deployment != nil {
 		alert.Status.Entity = &securityv1alpha1.AlertEntity{
-			Type:        "DEPLOYMENT",
-			ID:          deployment.GetId(),
-			Name:        deployment.GetName(),
-			Namespace:   deployment.GetNamespace(),
-			ClusterID:   deployment.GetClusterId(),
-			ClusterName: deployment.GetClusterName(),
+			Type:      "DEPLOYMENT",
+			ID:        deployment.GetId(),
+			Name:      deployment.GetName(),
+			Namespace: deployment.GetNamespace(),
 		}
 	} else if resource := a.GetResource(); resource != nil {
 		alert.Status.Entity = &securityv1alpha1.AlertEntity{
 			Name: resource.GetName(),
 		}
-		// Get cluster/namespace/resource type from common entity info
+		// Get namespace/resource type from common entity info
 		if common != nil {
 			alert.Status.Entity.ResourceType = common.GetResourceType().String()
 			alert.Status.Entity.Type = common.GetResourceType().String()
 			alert.Status.Entity.Namespace = common.GetNamespace()
-			alert.Status.Entity.ClusterID = common.GetClusterId()
-			alert.Status.Entity.ClusterName = common.GetClusterName()
 		}
 	}
 
