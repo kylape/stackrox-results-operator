@@ -36,7 +36,7 @@ func (s *MemoryStore) LoadFromDisk() error {
 	}{
 		{"alerts.json", &s.alerts},
 		{"images.ndjson", &s.images},
-		{"deployments.json", &s.deployments},
+		{"deployments.ndjson", &s.deployments},
 		{"clusters.json", &s.clusters},
 		{"nodes.json", &s.nodes},
 	}

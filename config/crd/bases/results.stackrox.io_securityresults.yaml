@@ -202,7 +202,6 @@ spec:
                                 type: string
                             type: object
                           cve:
-                            pattern: ^CVE-[0-9]{4}-[0-9]+$
                             type: string
                           cvss:
                             description: CVSS score (0-10)
