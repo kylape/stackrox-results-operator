@@ -75,10 +75,12 @@ func NewPreprocessHandler(store *storage.MemoryStore) http.HandlerFunc {
 			return
 		}
 
-		// Get alerts data
+		// Get alerts and deployments data
 		alertsData := store.GetAlerts()
-		if len(alertsData) == 0 {
-			http.Error(w, "No alerts data loaded", http.StatusBadRequest)
+		deploymentsData := store.GetDeployments()
+
+		if len(alertsData) == 0 && len(deploymentsData) == 0 {
+			http.Error(w, "No alerts or deployments data loaded", http.StatusBadRequest)
 			return
 		}
 
@@ -95,8 +97,8 @@ func NewPreprocessHandler(store *storage.MemoryStore) http.HandlerFunc {
 			return
 		}
 
-		// Create namespaces
-		if err := preprocessor.CreateNamespaces(context.Background(), kubeClient, alertsData); err != nil {
+		// Create namespaces from both alerts and deployments
+		if err := preprocessor.CreateNamespaces(context.Background(), kubeClient, alertsData, deploymentsData); err != nil {
 			http.Error(w, fmt.Sprintf("Preprocessing failed: %v", err), http.StatusInternalServerError)
 			return
 		}

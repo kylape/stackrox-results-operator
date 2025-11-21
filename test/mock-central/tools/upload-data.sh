@@ -20,7 +20,7 @@ echo "Data dir:  $DATA_DIR"
 echo ""
 
 # Check for required files
-REQUIRED_FILES=("alerts.json" "images.ndjson" "deployments.json" "clusters.json" "nodes.json")
+REQUIRED_FILES=("alerts.json" "images.ndjson" "deployments.ndjson" "clusters.json" "nodes.json")
 MISSING_FILES=()
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -39,11 +39,13 @@ fi
 echo "Uploading data files..."
 UPLOAD_CMD="curl -X POST $MOCK_ENDPOINT/admin/upload"
 
+set -x
 for file in "${REQUIRED_FILES[@]}"; do
     if [ -f "$DATA_DIR/$file" ]; then
         UPLOAD_CMD="$UPLOAD_CMD -F ${file%.*}=@$DATA_DIR/$file"
     fi
 done
+set +x
 
 UPLOAD_RESULT=$($UPLOAD_CMD)
 echo "$UPLOAD_RESULT" | jq '.' 2>/dev/null || echo "$UPLOAD_RESULT"

@@ -78,7 +78,7 @@ func (s *MemoryStore) SaveFile(filename string, data []byte) error {
 		s.alerts = data
 	case "images.ndjson":
 		s.images = data
-	case "deployments.json":
+	case "deployments.ndjson":
 		s.deployments = data
 	case "clusters.json":
 		s.clusters = data

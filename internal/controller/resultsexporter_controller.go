@@ -23,16 +23,17 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/stackrox/rox/generated/storage"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	securityv1alpha1 "github.com/kylape/stackrox-results-operator/api/security/v1alpha1"
 	resultsv1alpha1 "github.com/kylape/stackrox-results-operator/api/v1alpha1"
@@ -426,7 +427,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	}
 
 	// Fetch image vulnerabilities from Central
-	var images []*central.ImageScan
+	var images []*storage.Image
 	if exporter.Spec.Exports.ImageVulnerabilities != nil && exporter.Spec.Exports.ImageVulnerabilities.Enabled {
 		config := exporter.Spec.Exports.ImageVulnerabilities
 		opts := central.ListImageVulnerabilitiesOptions{
@@ -439,7 +440,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		}
 
 		var err error
-		images, err = centralClient.ListImageVulnerabilities(ctx, opts)
+		images, err = centralClient.ListImages(ctx, opts)
 		if err != nil {
 			return errors.Wrap(err, "failed to list image vulnerabilities")
 		}
@@ -478,19 +479,31 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	}
 
 	imagesByNamespace := central.GetImagesByNamespaceFromDeployments(deployments)
+
+	// Count total unique images across all namespaces
+	uniqueImages := make(map[string]bool)
+	for _, nsImages := range imagesByNamespace {
+		for imgName := range nsImages {
+			uniqueImages[imgName] = true
+		}
+	}
+
 	logger.V(1).Info("Built image-to-namespace mapping from Central deployments",
 		"namespaceCount", len(imagesByNamespace),
-		"deploymentCount", len(deployments))
+		"deploymentCount", len(deployments),
+		"uniqueImages", len(uniqueImages))
 
 	// Group image vulnerabilities by namespace based on actual pod usage
+	matchedImages := 0
+	unmatchedImages := 0
 	for _, img := range images {
-		if img == nil || img.Image == nil || img.Image.Name == nil {
+		if img == nil || img.GetName() == nil {
 			continue
 		}
 
 		// Convert image to ImageVulnerabilityData
 		imgData := r.convertImageToImageVulnData(img)
-		imageFullName := img.Image.Name.FullName
+		imageFullName := img.GetName().GetFullName()
 
 		// Add this image vulnerability to each namespace that uses it
 		addedToAnyNamespace := false
@@ -509,12 +522,37 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 
 		if addedToAnyNamespace {
 			counts.ImageVulnerabilities++
+			matchedImages++
+		} else {
+			unmatchedImages++
+			logger.V(2).Info("Image vulnerability not matched to any namespace",
+				"imageName", imageFullName)
 		}
 	}
+
+	logger.Info("Image vulnerability matching complete",
+		"totalImages", len(images),
+		"matchedImages", matchedImages,
+		"unmatchedImages", unmatchedImages,
+		"uniqueDeployedImages", len(uniqueImages))
 
 	// Create/update SecurityResults CR for each namespace
 	now := metav1.Now()
 	for namespace, status := range namespaceData {
+		// Check if namespace exists first
+		ns := &corev1.Namespace{}
+		if err := r.Get(ctx, client.ObjectKey{Name: namespace}, ns); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("Skipping SecurityResults for non-existent namespace",
+					"namespace", namespace,
+					"alertCount", len(status.Alerts),
+					"imageCount", len(status.ImageVulnerabilities))
+				continue
+			}
+			logger.Error(err, "Failed to check namespace existence", "namespace", namespace)
+			continue
+		}
+
 		// Calculate summary
 		summary := r.calculateSecurityResultsSummary(status)
 
@@ -522,6 +560,10 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "security-results",
 				Namespace: namespace,
+				Labels: map[string]string{
+					"app.kubernetes.io/managed-by": "results-operator",
+					"results.stackrox.io/exporter": exporter.Name,
+				},
 			},
 			Spec: securityv1alpha1.SecurityResultsSpec{},
 			Status: securityv1alpha1.SecurityResultsStatus{
@@ -615,6 +657,10 @@ func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Conte
 	csr := &securityv1alpha1.ClusterSecurityResults{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "cluster-security-results",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "results-operator",
+				"results.stackrox.io/exporter": exporter.Name,
+			},
 		},
 		Spec: securityv1alpha1.ClusterSecurityResultsSpec{},
 		Status: securityv1alpha1.ClusterSecurityResultsStatus{
@@ -721,66 +767,30 @@ func (r *ResultsExporterReconciler) convertAlertToAlertData(alert *storage.ListA
 	return alertData
 }
 
-func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *central.ImageScan) securityv1alpha1.ImageVulnerabilityData {
+func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *storage.Image) securityv1alpha1.ImageVulnerabilityData {
+	// Reuse the conversion logic from ConvertImageToCRD
+	vuln := central.ConvertImageToCRD(img, "")
+
 	imgData := securityv1alpha1.ImageVulnerabilityData{
-		Image: securityv1alpha1.ImageReference{
-			Name: img.Image.Name.FullName,
-		},
-		Summary: securityv1alpha1.VulnerabilitySummary{
-			Total:        img.Summary.TotalCVEs,
-			FixableTotal: img.Summary.FixableCVEs,
-		},
+		Image: *vuln.Status.Image,
 	}
 
-	// Get SHA from metadata if available
-	if img.Image.Metadata != nil && img.Image.Metadata.V1 != nil {
-		imgData.Image.SHA = img.Image.Metadata.V1.Digest
+	if vuln.Status.ScanTime != nil {
+		imgData.ScanTime = *vuln.Status.ScanTime
 	}
 
-	if img.ScanTime != "" {
-		if t, err := time.Parse(time.RFC3339, img.ScanTime); err == nil {
-			imgData.ScanTime = metav1.NewTime(t)
-		}
-	}
-
-	// Convert severity counts
-	if img.Summary.CriticalSeverity != nil {
-		imgData.Summary.Critical = &securityv1alpha1.SeverityCount{
-			Total:   img.Summary.CriticalSeverity.Total,
-			Fixable: img.Summary.CriticalSeverity.Fixable,
-		}
-	}
-	if img.Summary.HighSeverity != nil {
-		imgData.Summary.High = &securityv1alpha1.SeverityCount{
-			Total:   img.Summary.HighSeverity.Total,
-			Fixable: img.Summary.HighSeverity.Fixable,
-		}
-	}
-	if img.Summary.MediumSeverity != nil {
-		imgData.Summary.Medium = &securityv1alpha1.SeverityCount{
-			Total:   img.Summary.MediumSeverity.Total,
-			Fixable: img.Summary.MediumSeverity.Fixable,
-		}
-	}
-	if img.Summary.LowSeverity != nil {
-		imgData.Summary.Low = &securityv1alpha1.SeverityCount{
-			Total:   img.Summary.LowSeverity.Total,
-			Fixable: img.Summary.LowSeverity.Fixable,
-		}
+	if vuln.Status.Summary != nil {
+		imgData.Summary = *vuln.Status.Summary
 	}
 
 	// Convert CVEs (limit to 50 as per CRD validation)
-	if len(img.CVEs) > 0 {
+	if len(vuln.Status.CVEs) > 0 {
 		maxCVEs := 50
-		cveCount := len(img.CVEs)
+		cveCount := len(vuln.Status.CVEs)
 		if cveCount > maxCVEs {
 			cveCount = maxCVEs
 		}
-
-		imgData.CVEs = make([]securityv1alpha1.CVE, cveCount)
-		for i := 0; i < cveCount; i++ {
-			imgData.CVEs[i] = central.ConvertCVE(img.CVEs[i])
-		}
+		imgData.CVEs = vuln.Status.CVEs[:cveCount]
 	}
 
 	return imgData
@@ -1087,7 +1097,7 @@ func (r *ResultsExporterReconciler) syncImageVulnerabilitiesIndividual(ctx conte
 	}
 
 	// Fetch image vulnerabilities from Central
-	images, err := centralClient.ListImageVulnerabilities(ctx, opts)
+	images, err := centralClient.ListImages(ctx, opts)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to list image vulnerabilities from Central")
 	}
@@ -1101,7 +1111,7 @@ func (r *ResultsExporterReconciler) syncImageVulnerabilitiesIndividual(ctx conte
 	createdCount := 0
 	skippedCount := 0
 	for _, img := range images {
-		crd := img.ConvertToCRD(exporter.Name)
+		crd := central.ConvertImageToCRD(img, exporter.Name)
 
 		// Skip images with no vulnerabilities
 		if crd.Status.Summary == nil || crd.Status.Summary.Total == 0 || len(crd.Status.CVEs) == 0 {
@@ -1420,9 +1430,65 @@ func (r *ResultsExporterReconciler) setCondition(exporter *resultsv1alpha1.Resul
 // SetupWithManager sets up the controller with the Manager.
 func (r *ResultsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&resultsv1alpha1.ResultsExporter{},
-			// Only reconcile on spec changes, not status updates
-			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&resultsv1alpha1.ResultsExporter{}).
+		// Watch SecurityResults - reconcile the owning exporter when they change
+		Watches(
+			&securityv1alpha1.SecurityResults{},
+			handler.EnqueueRequestsFromMapFunc(r.mapSecurityResultsToExporter),
+		).
+		// Watch ClusterSecurityResults - reconcile the owning exporter when they change
+		Watches(
+			&securityv1alpha1.ClusterSecurityResults{},
+			handler.EnqueueRequestsFromMapFunc(r.mapClusterSecurityResultsToExporter),
+		).
 		Named("resultsexporter").
 		Complete(r)
+}
+
+// mapSecurityResultsToExporter maps a SecurityResults CR to its owning ResultsExporter
+func (r *ResultsExporterReconciler) mapSecurityResultsToExporter(ctx context.Context, obj client.Object) []reconcile.Request {
+	sr, ok := obj.(*securityv1alpha1.SecurityResults)
+	if !ok {
+		return nil
+	}
+
+	// Get exporter name from label
+	exporterName := sr.Labels["results.stackrox.io/exporter"]
+	if exporterName == "" {
+		return nil
+	}
+
+	// Return reconcile request for the exporter
+	// Note: ResultsExporter is cluster-scoped, so namespace is empty
+	return []reconcile.Request{
+		{
+			NamespacedName: client.ObjectKey{
+				Name: exporterName,
+			},
+		},
+	}
+}
+
+// mapClusterSecurityResultsToExporter maps a ClusterSecurityResults CR to its owning ResultsExporter
+func (r *ResultsExporterReconciler) mapClusterSecurityResultsToExporter(ctx context.Context, obj client.Object) []reconcile.Request {
+	csr, ok := obj.(*securityv1alpha1.ClusterSecurityResults)
+	if !ok {
+		return nil
+	}
+
+	// Get exporter name from label
+	exporterName := csr.Labels["results.stackrox.io/exporter"]
+	if exporterName == "" {
+		return nil
+	}
+
+	// Return reconcile request for the exporter
+	// Note: ResultsExporter is cluster-scoped, so namespace is empty
+	return []reconcile.Request{
+		{
+			NamespacedName: client.ObjectKey{
+				Name: exporterName,
+			},
+		},
+	}
 }

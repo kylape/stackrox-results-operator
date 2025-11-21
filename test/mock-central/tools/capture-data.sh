@@ -46,7 +46,7 @@ echo ""
 QUERY="Cluster:$CLUSTER_NAME"
 ENCODED_QUERY=$(printf %s "$QUERY" | jq -sRr @uri)
 
-# # Capture alerts
+# # # Capture alerts
 # echo "[1/4] Fetching alerts for cluster '$CLUSTER_NAME'..."
 # curl -k -H "Authorization: Bearer $ROX_API_TOKEN" \
 #   "https://$API_ENDPOINT/v1/alerts?query=$ENCODED_QUERY" \
@@ -54,7 +54,7 @@ ENCODED_QUERY=$(printf %s "$QUERY" | jq -sRr @uri)
 # ALERT_COUNT=$(jq '.alerts | length' "$OUTPUT_DIR/alerts.json" 2>/dev/null || echo "0")
 # echo "      Retrieved $ALERT_COUNT alerts"
 
-# # Capture images (NDJSON)
+# # # Capture images (NDJSON)
 # echo "[2/5] Fetching images for cluster '$CLUSTER_NAME' (this may take a while)..."
 # curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
 #   "https://$API_ENDPOINT/v1/export/images?query=$ENCODED_QUERY" \
@@ -65,9 +65,9 @@ ENCODED_QUERY=$(printf %s "$QUERY" | jq -sRr @uri)
 # Capture deployments
 echo "[3/5] Fetching deployments for cluster '$CLUSTER_NAME'..."
 curl -k -s -H "Authorization: Bearer $ROX_API_TOKEN" \
-  "https://$API_ENDPOINT/v1/deployments?query=$ENCODED_QUERY" \
-  > "$OUTPUT_DIR/deployments.json"
-DEPLOYMENT_COUNT=$(jq '.deployments | length' "$OUTPUT_DIR/deployments.json" 2>/dev/null || echo "0")
+  "https://$API_ENDPOINT/v1/export/deployments?query=$ENCODED_QUERY" \
+  > "$OUTPUT_DIR/deployments.ndjson"
+DEPLOYMENT_COUNT=$(wc -l < "$OUTPUT_DIR/deployments.ndjson" | tr -d ' ')
 echo "      Retrieved $DEPLOYMENT_COUNT deployments"
 
 # Capture clusters

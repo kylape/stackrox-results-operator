@@ -41,7 +41,7 @@ type AlertData struct {
 	PolicyName string `json:"policyName"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CRITICAL;HIGH;MEDIUM;LOW
+	// +kubebuilder:validation:Enum=CRITICAL;HIGH;MEDIUM;LOW;UNKNOWN
 	PolicySeverity string `json:"policySeverity"`
 
 	// +optional

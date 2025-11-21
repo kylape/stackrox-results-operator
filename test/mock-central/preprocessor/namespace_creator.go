@@ -1,6 +1,8 @@
 package preprocessor
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,28 +26,74 @@ type AlertData struct {
 	} `json:"alerts"`
 }
 
-// CreateNamespaces extracts namespaces from alerts data and creates them in Kubernetes
-func CreateNamespaces(ctx context.Context, kubeClient kubernetes.Interface, alertsJSON []byte) error {
-	// Parse alerts
-	var data AlertData
-	if err := json.Unmarshal(alertsJSON, &data); err != nil {
-		return fmt.Errorf("failed to parse alerts JSON: %w", err)
-	}
+// DeploymentExportLine represents one line from deployments.ndjson
+type DeploymentExportLine struct {
+	Result *struct {
+		Deployment *struct {
+			Namespace string `json:"namespace"`
+		} `json:"deployment"`
+	} `json:"result"`
+}
 
-	// Extract unique namespaces
+// CreateNamespaces extracts namespaces from alerts and deployments data and creates them in Kubernetes
+func CreateNamespaces(ctx context.Context, kubeClient kubernetes.Interface, alertsJSON, deploymentsNDJSON []byte) error {
 	namespaces := make(map[string]bool)
-	for _, alert := range data.Alerts {
-		// Try deployment namespace first
-		if alert.Deployment != nil && alert.Deployment.Namespace != "" {
-			namespaces[alert.Deployment.Namespace] = true
+
+	// Extract namespaces from alerts
+	if len(alertsJSON) > 0 {
+		var data AlertData
+		if err := json.Unmarshal(alertsJSON, &data); err != nil {
+			return fmt.Errorf("failed to parse alerts JSON: %w", err)
 		}
-		// Also check common entity info for resources
-		if alert.CommonEntityInfo != nil && alert.CommonEntityInfo.Namespace != "" {
-			namespaces[alert.CommonEntityInfo.Namespace] = true
+
+		for _, alert := range data.Alerts {
+			// Try deployment namespace first
+			if alert.Deployment != nil && alert.Deployment.Namespace != "" {
+				namespaces[alert.Deployment.Namespace] = true
+			}
+			// Also check common entity info for resources
+			if alert.CommonEntityInfo != nil && alert.CommonEntityInfo.Namespace != "" {
+				namespaces[alert.CommonEntityInfo.Namespace] = true
+			}
 		}
+		log.Printf("Found %d unique namespaces in alerts data", len(namespaces))
 	}
 
-	log.Printf("Found %d unique namespaces in alerts data", len(namespaces))
+	// Extract namespaces from deployments (NDJSON format)
+	if len(deploymentsNDJSON) > 0 {
+		deploymentCount := 0
+		scanner := bufio.NewScanner(bytes.NewReader(deploymentsNDJSON))
+
+		// Increase buffer size for large deployment data
+		const maxScanTokenSize = 10 * 1024 * 1024 // 10MB
+		buf := make([]byte, maxScanTokenSize)
+		scanner.Buffer(buf, maxScanTokenSize)
+
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+
+			var exportLine DeploymentExportLine
+			if err := json.Unmarshal(line, &exportLine); err != nil {
+				log.Printf("Warning: failed to parse deployment line: %v", err)
+				continue
+			}
+
+			if exportLine.Result != nil && exportLine.Result.Deployment != nil && exportLine.Result.Deployment.Namespace != "" {
+				namespaces[exportLine.Result.Deployment.Namespace] = true
+				deploymentCount++
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("failed to scan deployments NDJSON: %w", err)
+		}
+		log.Printf("Found %d additional unique namespaces in %d deployments", len(namespaces)-deploymentCount, deploymentCount)
+	}
+
+	log.Printf("Total %d unique namespaces to create", len(namespaces))
 
 	// Create each namespace
 	created := 0

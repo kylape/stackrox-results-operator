@@ -96,7 +96,7 @@ type AlertStatus struct {
 	PolicyName string `json:"policyName,omitempty"`
 
 	// +optional
-	// +kubebuilder:validation:Enum=CRITICAL;HIGH;MEDIUM;LOW
+	// +kubebuilder:validation:Enum=CRITICAL;HIGH;MEDIUM;LOW;UNKNOWN
 	PolicySeverity string `json:"policySeverity,omitempty"`
 
 	// +optional

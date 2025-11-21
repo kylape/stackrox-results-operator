@@ -24,103 +24,8 @@ type ExportImageResponse struct {
 }
 
 type ExportImageResult struct {
-	Image *StorageImage `json:"image"`
+	Image json.RawMessage `json:"image"`
 }
-
-// StorageImage represents the full image object from the export API
-type StorageImage struct {
-	ID       string         `json:"id"`
-	Name     *ImageName     `json:"name"`
-	Metadata *ImageMetadata `json:"metadata,omitempty"`
-	Scan     *ImageScanData `json:"scan,omitempty"`
-}
-
-// ImageScanData represents scan results from the export API
-type ImageScanData struct {
-	ScannerVersion string       `json:"scannerVersion,omitempty"`
-	ScanTime       string       `json:"scanTime"`
-	Components     []*Component `json:"components,omitempty"`
-}
-
-// ImageScan represents an image scan result (legacy structure for compatibility)
-type ImageScan struct {
-	Image      *Image       `json:"image"`
-	ScanTime   string       `json:"scanTime"`
-	Components []*Component `json:"components,omitempty"`
-	CVEs       []*CVE       `json:"cves,omitempty"`
-	Summary    *VulnSummary `json:"summary,omitempty"`
-}
-
-type Image struct {
-	ID       string         `json:"id"`
-	Name     *ImageName     `json:"name"`
-	Metadata *ImageMetadata `json:"metadata,omitempty"`
-}
-
-type ImageName struct {
-	Registry string `json:"registry,omitempty"`
-	Remote   string `json:"remote,omitempty"`
-	Tag      string `json:"tag,omitempty"`
-	FullName string `json:"fullName,omitempty"`
-}
-
-type ImageMetadata struct {
-	V1 *V1Metadata `json:"v1,omitempty"`
-}
-
-type V1Metadata struct {
-	Digest string `json:"digest,omitempty"`
-}
-
-type Component struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Location string `json:"location,omitempty"`
-	Vulns    []*CVE `json:"vulns,omitempty"`
-}
-
-type CVE struct {
-	CVE               string     `json:"cve"`
-	Summary           string     `json:"summary,omitempty"`
-	Link              string     `json:"link,omitempty"`
-	Severity          string     `json:"severity"`
-	CVSS              float64    `json:"cvss,omitempty"`
-	CVSSv3            *CVSSv3    `json:"cvssV3,omitempty"`
-	Component         *Component `json:"component,omitempty"`
-	Fixable           bool       `json:"fixable,omitempty"`
-	FixedBy           string     `json:"fixedBy,omitempty"`
-	Published         string     `json:"publishedOn,omitempty"`
-	DiscoveredInImage string     `json:"discoveredInImage,omitempty"`
-	State             string     `json:"state,omitempty"`
-	EPSS              *EPSS      `json:"epss,omitempty"`
-}
-
-type CVSSv3 struct {
-	Score  float64 `json:"score"`
-	Vector string  `json:"vector"`
-}
-
-type EPSS struct {
-	Score      float64 `json:"score"`
-	Percentile float64 `json:"percentile"`
-}
-
-type VulnSummary struct {
-	TotalCVEs        int            `json:"totalCves,omitempty"`
-	FixableCVEs      int            `json:"fixableCves,omitempty"`
-	CriticalSeverity *SeverityCount `json:"criticalSeverity,omitempty"`
-	HighSeverity     *SeverityCount `json:"highSeverity,omitempty"`
-	MediumSeverity   *SeverityCount `json:"mediumSeverity,omitempty"`
-	LowSeverity      *SeverityCount `json:"lowSeverity,omitempty"`
-}
-
-type SeverityCount struct {
-	Total   int `json:"total"`
-	Fixable int `json:"fixable"`
-}
-
-// NodeScan represents a node scan result from Central
-// NodeScan type removed - now using storage.Node from StackRox protobuf types
 
 // ListImageVulnerabilitiesOptions contains options for listing image vulnerabilities
 type ListImageVulnerabilitiesOptions struct {
@@ -137,7 +42,7 @@ type ListImageVulnerabilitiesOptions struct {
 }
 
 // ListImageVulnerabilities fetches image vulnerability data from Central
-func (c *Client) ListImageVulnerabilities(ctx context.Context, opts ListImageVulnerabilitiesOptions) ([]*ImageScan, error) {
+func (c *Client) ListImages(ctx context.Context, opts ListImageVulnerabilitiesOptions) ([]*storage.Image, error) {
 	log.V(1).Info("Listing image vulnerabilities from Central")
 
 	// Build query
@@ -184,7 +89,7 @@ func (c *Client) ListImageVulnerabilities(ctx context.Context, opts ListImageVul
 	}
 
 	// Parse newline-delimited JSON stream
-	var imageScans []*ImageScan
+	var images []*storage.Image
 	scanner := bufio.NewScanner(resp.Body)
 
 	// Increase buffer size for large scan results
@@ -193,38 +98,55 @@ func (c *Client) ListImageVulnerabilities(ctx context.Context, opts ListImageVul
 	scanner.Buffer(buf, maxScanTokenSize)
 
 	imageCount := 0
+	skippedNoScan := 0
+	skippedNoResult := 0
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
 
+		// Step 1: Parse wrapper JSON structure
 		var exportResp ExportImageResponse
 		if err := json.Unmarshal(line, &exportResp); err != nil {
-			log.Error(err, "Failed to parse export image response", "line", string(line))
+			log.Error(err, "Failed to parse export image wrapper", "line", string(line[:min(len(line), 200)]))
 			continue
 		}
 
-		if exportResp.Result == nil || exportResp.Result.Image == nil {
+		if exportResp.Result == nil || len(exportResp.Result.Image) == 0 {
+			skippedNoResult++
 			continue
 		}
 
-		img := exportResp.Result.Image
+		// Step 2: Parse the image proto from raw bytes
+		img := &storage.Image{}
+		if err := protojson.Unmarshal(exportResp.Result.Image, img); err != nil {
+			log.Error(err, "Failed to parse image protobuf")
+			continue
+		}
+
+		if img.GetId() == "" {
+			skippedNoResult++
+			continue
+		}
 
 		// Skip images without scan data
-		if img.Scan == nil || len(img.Scan.Components) == 0 {
+		scan := img.GetScan()
+		if scan == nil || len(scan.GetComponents()) == 0 {
+			imgName := ""
+			if img.GetName() != nil {
+				imgName = img.GetName().GetFullName()
+			}
+			log.V(1).Info("Skipping image without scan data", "imageName", imgName)
+			skippedNoScan++
 			continue
 		}
 
-		// Convert to ImageScan format
-		imageScan := convertStorageImageToImageScan(img)
+		// Note: MaxCVEsPerImage filtering is not applied here since CVEs are nested
+		// in components. Filtering would require modifying the proto, which we avoid.
+		// This can be handled in the conversion layer if needed.
 
-		// Apply filters
-		if opts.MaxCVEsPerImage > 0 && len(imageScan.CVEs) > opts.MaxCVEsPerImage {
-			imageScan.CVEs = imageScan.CVEs[:opts.MaxCVEsPerImage]
-		}
-
-		imageScans = append(imageScans, imageScan)
+		images = append(images, img)
 		imageCount++
 
 		// Limit number of images if requested
@@ -237,89 +159,11 @@ func (c *Client) ListImageVulnerabilities(ctx context.Context, opts ListImageVul
 		return nil, errors.Wrap(err, "failed to read export stream")
 	}
 
-	log.Info("Retrieved image vulnerabilities from Central", "count", len(imageScans))
-	return imageScans, nil
-}
-
-// convertStorageImageToImageScan converts the export API format to ImageScan format
-func convertStorageImageToImageScan(img *StorageImage) *ImageScan {
-	scan := &ImageScan{
-		Image: &Image{
-			ID:       img.ID,
-			Name:     img.Name,
-			Metadata: img.Metadata,
-		},
-	}
-
-	if img.Scan != nil {
-		scan.ScanTime = img.Scan.ScanTime
-		scan.Components = img.Scan.Components
-
-		// Extract CVEs from components
-		var allCVEs []*CVE
-		for _, comp := range img.Scan.Components {
-			for _, vuln := range comp.Vulns {
-				// Set component reference on the CVE
-				if vuln.Component == nil {
-					vuln.Component = &Component{
-						Name:     comp.Name,
-						Version:  comp.Version,
-						Location: comp.Location,
-					}
-				}
-				allCVEs = append(allCVEs, vuln)
-			}
-		}
-		scan.CVEs = allCVEs
-
-		// Calculate summary
-		scan.Summary = calculateVulnSummary(allCVEs)
-	}
-
-	return scan
-}
-
-// calculateVulnSummary generates a vulnerability summary from CVEs
-func calculateVulnSummary(cves []*CVE) *VulnSummary {
-	summary := &VulnSummary{
-		CriticalSeverity: &SeverityCount{},
-		HighSeverity:     &SeverityCount{},
-		MediumSeverity:   &SeverityCount{},
-		LowSeverity:      &SeverityCount{},
-	}
-
-	for _, cve := range cves {
-		summary.TotalCVEs++
-		if cve.Fixable {
-			summary.FixableCVEs++
-		}
-
-		severity := strings.ToUpper(cve.Severity)
-		switch severity {
-		case "CRITICAL", "CRITICAL_VULNERABILITY_SEVERITY":
-			summary.CriticalSeverity.Total++
-			if cve.Fixable {
-				summary.CriticalSeverity.Fixable++
-			}
-		case "HIGH", "IMPORTANT", "IMPORTANT_VULNERABILITY_SEVERITY":
-			summary.HighSeverity.Total++
-			if cve.Fixable {
-				summary.HighSeverity.Fixable++
-			}
-		case "MEDIUM", "MODERATE", "MODERATE_VULNERABILITY_SEVERITY":
-			summary.MediumSeverity.Total++
-			if cve.Fixable {
-				summary.MediumSeverity.Fixable++
-			}
-		case "LOW", "LOW_VULNERABILITY_SEVERITY":
-			summary.LowSeverity.Total++
-			if cve.Fixable {
-				summary.LowSeverity.Fixable++
-			}
-		}
-	}
-
-	return summary
+	log.Info("Retrieved image vulnerabilities from Central",
+		"count", len(images),
+		"skippedNoScan", skippedNoScan,
+		"skippedNoResult", skippedNoResult)
+	return images, nil
 }
 
 // ListNodeVulnerabilities fetches node vulnerability data from Central
@@ -401,11 +245,8 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 
 		nodesResponse := v1.ListNodesResponse{}
 
-		// Use protojson to unmarshal, same as alerts.go
-		unmarshaler := protojson.UnmarshalOptions{
-			DiscardUnknown: true, // Ignore fields we don't understand
-		}
-		if err := unmarshaler.Unmarshal(body, &nodesResponse); err != nil {
+		// Use protojson to unmarshal
+		if err := protojson.Unmarshal(body, &nodesResponse); err != nil {
 			log.Error(err, "Failed to parse nodes response for cluster", "clusterID", cluster.ID)
 			continue // Skip this cluster on error
 		}
@@ -423,50 +264,172 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 	return allNodes, nil
 }
 
-// ConvertToCRD converts an ImageScan to ImageVulnerability CRD
-func (img *ImageScan) ConvertToCRD(exporterName string) *securityv1alpha1.ImageVulnerability {
+// ConvertImageToCRD converts a storage.Image to ImageVulnerability CRD
+func ConvertImageToCRD(img *storage.Image, exporterName string) *securityv1alpha1.ImageVulnerability {
 	vuln := &securityv1alpha1.ImageVulnerability{
 		Spec:   securityv1alpha1.ImageVulnerabilitySpec{},
 		Status: securityv1alpha1.ImageVulnerabilityStatus{},
 	}
 
 	// Image reference
-	if img.Image != nil && img.Image.Name != nil {
+	imageName := img.GetName()
+	if imageName != nil {
+		fullName := imageName.GetFullName()
 		imageRef := securityv1alpha1.ImageReference{
-			Name:     extractImageName(img.Image.Name.FullName),
-			FullName: img.Image.Name.FullName,
-			Registry: img.Image.Name.Registry,
-			Remote:   img.Image.Name.Remote,
-			Tag:      img.Image.Name.Tag,
+			Name:     extractImageName(fullName),
+			FullName: fullName,
+			Registry: imageName.GetRegistry(),
+			Remote:   imageName.GetRemote(),
+			Tag:      imageName.GetTag(),
 		}
 
-		if img.Image.Metadata != nil && img.Image.Metadata.V1 != nil {
-			imageRef.SHA = img.Image.Metadata.V1.Digest
+		metadata := img.GetMetadata()
+		if metadata != nil && metadata.GetV1() != nil {
+			imageRef.SHA = metadata.GetV1().GetDigest()
 		}
 
 		vuln.Status.Image = &imageRef
 
 		// Generate name from image
-		vuln.Name = generateImageVulnName(img.Image.Name.FullName, imageRef.SHA)
+		vuln.Name = generateImageVulnName(fullName, imageRef.SHA)
 	}
 
-	// Scan time
-	if timeVal, err := parseTime(img.ScanTime); err == nil {
-		vuln.Status.ScanTime = timeVal
-	}
-
-	// Summary
-	if img.Summary != nil {
-		summary := convertVulnSummary(img.Summary)
-		vuln.Status.Summary = &summary
-	}
-
-	// CVEs
-	if len(img.CVEs) > 0 {
-		vuln.Status.CVEs = make([]securityv1alpha1.CVE, len(img.CVEs))
-		for i, cve := range img.CVEs {
-			vuln.Status.CVEs[i] = ConvertCVE(cve)
+	// Extract CVEs and calculate summary from components
+	scan := img.GetScan()
+	if scan != nil {
+		// Scan time
+		if scanTime := scan.GetScanTime(); scanTime != nil {
+			t := metav1.NewTime(scanTime.AsTime())
+			vuln.Status.ScanTime = &t
 		}
+
+		// Extract all CVEs from components
+		allCVEs := make(map[string]*securityv1alpha1.CVE) // Deduplicate CVEs by ID
+		criticalCount := &securityv1alpha1.SeverityCount{}
+		highCount := &securityv1alpha1.SeverityCount{}
+		mediumCount := &securityv1alpha1.SeverityCount{}
+		lowCount := &securityv1alpha1.SeverityCount{}
+
+		for _, component := range scan.GetComponents() {
+			for _, vuln := range component.GetVulns() {
+				cveID := vuln.GetCve()
+				if cveID == "" {
+					continue
+				}
+
+				// Add to deduped CVE map
+				if _, exists := allCVEs[cveID]; !exists {
+					cve := securityv1alpha1.CVE{
+						CVE:      cveID,
+						Summary:  vuln.GetSummary(),
+						Link:     vuln.GetLink(),
+						Severity: convertStorageSeverity(vuln.GetSeverity()),
+						Component: &securityv1alpha1.Component{
+							Name:     component.GetName(),
+							Version:  component.GetVersion(),
+							Location: component.GetLocation(),
+						},
+					}
+
+					if vuln.GetCvss() > 0 {
+						cve.CVSS = fmt.Sprintf("%.1f", vuln.GetCvss())
+					}
+
+					fixedBy := vuln.GetSetFixedBy()
+					if fixedBy != nil {
+						if fb, ok := fixedBy.(*storage.EmbeddedVulnerability_FixedBy); ok {
+							cve.FixedBy = fb.FixedBy
+							cve.Fixable = fb.FixedBy != ""
+						}
+					}
+
+					if cvssV3 := vuln.GetCvssV3(); cvssV3 != nil {
+						cve.CVSSv3 = &securityv1alpha1.CVSSv3{
+							Score:  fmt.Sprintf("%.1f", cvssV3.GetScore()),
+							Vector: cvssV3.GetVector(),
+						}
+					}
+
+					if epss := vuln.GetEpss(); epss != nil {
+						cve.EPSS = &securityv1alpha1.EPSS{
+							Score:      fmt.Sprintf("%.5f", epss.GetEpssProbability()),
+							Percentile: fmt.Sprintf("%.5f", epss.GetEpssPercentile()),
+						}
+					}
+
+					if publishedOn := vuln.GetPublishedOn(); publishedOn != nil {
+						t := metav1.NewTime(publishedOn.AsTime())
+						cve.Published = &t
+					}
+
+					if firstImageOccurrence := vuln.GetFirstImageOccurrence(); firstImageOccurrence != nil {
+						t := metav1.NewTime(firstImageOccurrence.AsTime())
+						cve.DiscoveredInImage = &t
+					}
+
+					cve.State = convertVulnerabilityState(vuln.GetState())
+
+					allCVEs[cveID] = &cve
+				}
+
+				// Count by severity for summary
+				fixable := false
+				if fb := vuln.GetSetFixedBy(); fb != nil {
+					if fixed, ok := fb.(*storage.EmbeddedVulnerability_FixedBy); ok {
+						fixable = fixed.FixedBy != ""
+					}
+				}
+
+				switch vuln.GetSeverity() {
+				case storage.VulnerabilitySeverity_CRITICAL_VULNERABILITY_SEVERITY:
+					criticalCount.Total++
+					if fixable {
+						criticalCount.Fixable++
+					}
+				case storage.VulnerabilitySeverity_IMPORTANT_VULNERABILITY_SEVERITY:
+					highCount.Total++
+					if fixable {
+						highCount.Fixable++
+					}
+				case storage.VulnerabilitySeverity_MODERATE_VULNERABILITY_SEVERITY:
+					mediumCount.Total++
+					if fixable {
+						mediumCount.Fixable++
+					}
+				case storage.VulnerabilitySeverity_LOW_VULNERABILITY_SEVERITY:
+					lowCount.Total++
+					if fixable {
+						lowCount.Fixable++
+					}
+				}
+			}
+		}
+
+		// Convert map to slice
+		cveSlice := make([]securityv1alpha1.CVE, 0, len(allCVEs))
+		for _, cve := range allCVEs {
+			cveSlice = append(cveSlice, *cve)
+		}
+		vuln.Status.CVEs = cveSlice
+
+		// Build summary
+		summary := securityv1alpha1.VulnerabilitySummary{
+			Total:        criticalCount.Total + highCount.Total + mediumCount.Total + lowCount.Total,
+			FixableTotal: criticalCount.Fixable + highCount.Fixable + mediumCount.Fixable + lowCount.Fixable,
+		}
+		if criticalCount.Total > 0 {
+			summary.Critical = criticalCount
+		}
+		if highCount.Total > 0 {
+			summary.High = highCount
+		}
+		if mediumCount.Total > 0 {
+			summary.Medium = mediumCount
+		}
+		if lowCount.Total > 0 {
+			summary.Low = lowCount
+		}
+		vuln.Status.Summary = &summary
 	}
 
 	// Labels
@@ -635,130 +598,21 @@ func convertStorageSeverity(severity storage.VulnerabilitySeverity) string {
 	}
 }
 
-// Helper functions
-
-func convertVulnSummary(summary *VulnSummary) securityv1alpha1.VulnerabilitySummary {
-	result := securityv1alpha1.VulnerabilitySummary{
-		Total:        summary.TotalCVEs,
-		FixableTotal: summary.FixableCVEs,
-	}
-
-	if summary.CriticalSeverity != nil {
-		result.Critical = &securityv1alpha1.SeverityCount{
-			Total:   summary.CriticalSeverity.Total,
-			Fixable: summary.CriticalSeverity.Fixable,
-		}
-	}
-
-	if summary.HighSeverity != nil {
-		result.High = &securityv1alpha1.SeverityCount{
-			Total:   summary.HighSeverity.Total,
-			Fixable: summary.HighSeverity.Fixable,
-		}
-	}
-
-	if summary.MediumSeverity != nil {
-		result.Medium = &securityv1alpha1.SeverityCount{
-			Total:   summary.MediumSeverity.Total,
-			Fixable: summary.MediumSeverity.Fixable,
-		}
-	}
-
-	if summary.LowSeverity != nil {
-		result.Low = &securityv1alpha1.SeverityCount{
-			Total:   summary.LowSeverity.Total,
-			Fixable: summary.LowSeverity.Fixable,
-		}
-	}
-
-	return result
-}
-
-func normalizeSeverity(severity string) string {
-	// Normalize StackRox severity values to CRD-expected values
-	severity = strings.ToUpper(severity)
-	switch severity {
-	case "CRITICAL", "CRITICAL_VULNERABILITY_SEVERITY":
-		return "CRITICAL"
-	case "HIGH", "IMPORTANT", "IMPORTANT_VULNERABILITY_SEVERITY":
-		return "HIGH"
-	case "MEDIUM", "MODERATE", "MODERATE_VULNERABILITY_SEVERITY":
-		return "MEDIUM"
-	case "LOW", "LOW_VULNERABILITY_SEVERITY":
-		return "LOW"
-	case "UNKNOWN", "UNKNOWN_VULNERABILITY_SEVERITY", "":
-		return "LOW" // Default unknown to LOW
+// convertVulnerabilityState converts storage.VulnerabilityState to string
+func convertVulnerabilityState(state storage.VulnerabilityState) string {
+	switch state {
+	case storage.VulnerabilityState_OBSERVED:
+		return "OBSERVED"
+	case storage.VulnerabilityState_DEFERRED:
+		return "DEFERRED"
+	case storage.VulnerabilityState_FALSE_POSITIVE:
+		return "FALSE_POSITIVE"
 	default:
-		return "LOW"
+		return ""
 	}
 }
 
-// ConvertCVE converts a Central CVE to a CRD CVE
-func ConvertCVE(cve *CVE) securityv1alpha1.CVE {
-	cvssStr := ""
-	if cve.CVSS > 0 {
-		cvssStr = fmt.Sprintf("%.1f", cve.CVSS)
-	}
-
-	result := securityv1alpha1.CVE{
-		CVE:      cve.CVE,
-		Severity: normalizeSeverity(cve.Severity),
-		Summary:  cve.Summary,
-		Link:     cve.Link,
-		CVSS:     cvssStr,
-		Fixable:  cve.Fixable,
-		FixedBy:  cve.FixedBy,
-		State:    cve.State,
-	}
-
-	if cve.CVSSv3 != nil {
-		cvssv3ScoreStr := ""
-		if cve.CVSSv3.Score > 0 {
-			cvssv3ScoreStr = fmt.Sprintf("%.1f", cve.CVSSv3.Score)
-		}
-		result.CVSSv3 = &securityv1alpha1.CVSSv3{
-			Score:  cvssv3ScoreStr,
-			Vector: cve.CVSSv3.Vector,
-		}
-	}
-
-	if cve.Component != nil {
-		result.Component = &securityv1alpha1.Component{
-			Name:     cve.Component.Name,
-			Version:  cve.Component.Version,
-			Location: cve.Component.Location,
-		}
-	}
-
-	if cve.EPSS != nil {
-		epssScoreStr := ""
-		if cve.EPSS.Score > 0 {
-			epssScoreStr = fmt.Sprintf("%.5f", cve.EPSS.Score)
-		}
-		epssPercentileStr := ""
-		if cve.EPSS.Percentile > 0 {
-			epssPercentileStr = fmt.Sprintf("%.5f", cve.EPSS.Percentile)
-		}
-		result.EPSS = &securityv1alpha1.EPSS{
-			Score:      epssScoreStr,
-			Percentile: epssPercentileStr,
-		}
-	}
-
-	if cve.Published != "" {
-		if timeVal, err := parseTime(cve.Published); err == nil {
-			result.Published = timeVal
-		}
-	}
-
-	if cve.DiscoveredInImage != "" {
-		if timeVal, err := parseTime(cve.DiscoveredInImage); err == nil {
-			result.DiscoveredInImage = timeVal
-		}
-	}
-
-	return result
-}
+// Helper functions
 
 func extractImageName(fullName string) string {
 	// Extract just the image name from full name

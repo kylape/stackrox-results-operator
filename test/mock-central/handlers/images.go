@@ -18,7 +18,7 @@ func NewImagesHandler(store *storage.MemoryStore) http.HandlerFunc {
 
 		// Get all images NDJSON
 		data := store.GetImages()
-		if data == nil || len(data) == 0 {
+		if len(data) == 0 {
 			http.Error(w, "No data loaded", http.StatusNotFound)
 			return
 		}

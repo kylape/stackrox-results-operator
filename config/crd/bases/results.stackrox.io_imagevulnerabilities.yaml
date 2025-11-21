@@ -133,6 +133,7 @@ spec:
                       - HIGH
                       - MEDIUM
                       - LOW
+                      - UNKNOWN
                       type: string
                     state:
                       enum:
