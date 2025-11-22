@@ -1556,7 +1556,7 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 	// Get limits with defaults
 	maxAlerts := 100 // default
 	maxImages := 100 // default
-	maxCVEsTotal := 10000 // default
+	maxCVEsTotal := 5000 // default
 
 	if config.Alerts != nil && config.Alerts.MaxPerNamespace > 0 {
 		maxAlerts = config.Alerts.MaxPerNamespace
