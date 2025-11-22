@@ -319,6 +319,11 @@ spec:
                 - imageVulnerabilities
                 - nodeVulnerabilities
                 type: object
+              lastHandledResyncAt:
+                description: |-
+                  Last handled resync annotation value
+                  Tracks the value of results.stackrox.io/resync annotation to detect changes
+                type: string
               lastSuccessfulSync:
                 description: Last successful sync
                 format: date-time

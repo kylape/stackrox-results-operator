@@ -232,6 +232,11 @@ type ResultsExporterStatus struct {
 	// Observed generation
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Last handled resync annotation value
+	// Tracks the value of results.stackrox.io/resync annotation to detect changes
+	// +optional
+	LastHandledResyncAt string `json:"lastHandledResyncAt,omitempty"`
 }
 
 // ExportedResourceCounts tracks how many resources have been exported

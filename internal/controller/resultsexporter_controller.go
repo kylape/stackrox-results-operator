@@ -81,6 +81,9 @@ const (
 	// Finalizer name
 	finalizerName = "results.stackrox.io/cleanup"
 
+	// Annotation for manual resync
+	resyncAnnotation = "results.stackrox.io/resync"
+
 	// Default sync interval
 	defaultSyncInterval = 5 * time.Minute
 )
@@ -143,6 +146,22 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Determine if we need to sync
 	needsSync := false
 	var skipReason string
+
+	// Check for resync annotation
+	resyncValue := exporter.Annotations[resyncAnnotation]
+	if resyncValue != "" && resyncValue != exporter.Status.LastHandledResyncAt {
+		// Invalidate alert cache on manual resync
+		r.alertCacheMutex.Lock()
+		r.cachedAlerts = nil
+		r.cachedAlertsTime = time.Time{}
+		r.alertCacheMutex.Unlock()
+
+		needsSync = true
+		logger.Info("Resync annotation changed, invalidating cache and syncing",
+			"resyncValue", resyncValue,
+			"lastHandled", exporter.Status.LastHandledResyncAt)
+		exporter.Status.LastHandledResyncAt = resyncValue
+	}
 
 	// Always sync if generation changed (spec changed)
 	if exporter.Status.ObservedGeneration != exporter.Generation {
