@@ -225,6 +225,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	centralClient, err := r.createCentralClient(ctx, exporter)
 	if err != nil {
 		logger.Info("Failed to create Central client", "error", err.Error())
+		exporter.Status.ConsecutiveConnectionFailures++
 		r.setCondition(exporter, TypeCentralConnected, metav1.ConditionFalse,
 			"ConnectionFailed", fmt.Sprintf("Failed to connect to Central: %v", err))
 		r.setCondition(exporter, TypeReady, metav1.ConditionFalse,
@@ -232,12 +233,24 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if updateErr := r.Status().Update(ctx, exporter); updateErr != nil {
 			logger.Error(updateErr, "Failed to update status")
 		}
-		return ctrl.Result{RequeueAfter: 1 * time.Minute}, fmt.Errorf("failed to create Central client")
+
+		// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped at 1 minute)
+		backoffSeconds := 1 << (exporter.Status.ConsecutiveConnectionFailures - 1) // 2^(n-1)
+		if backoffSeconds > 60 {                                                    // Cap at 1 minute
+			backoffSeconds = 60
+		}
+		backoffInterval := time.Duration(backoffSeconds) * time.Second
+		logger.Info("Applying exponential backoff for connection failure",
+			"consecutiveConnectionFailures", exporter.Status.ConsecutiveConnectionFailures,
+			"interval", backoffInterval)
+
+		return ctrl.Result{RequeueAfter: backoffInterval}, fmt.Errorf("failed to create Central client")
 	}
 
 	// Test connection
 	if err := centralClient.TestConnection(ctx); err != nil {
 		logger.Info("Central connection test failed", "error", err.Error())
+		exporter.Status.ConsecutiveConnectionFailures++
 		r.setCondition(exporter, TypeCentralConnected, metav1.ConditionFalse,
 			"ConnectionTestFailed", fmt.Sprintf("Connection test failed: %v", err))
 		r.setCondition(exporter, TypeReady, metav1.ConditionFalse,
@@ -245,9 +258,22 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if updateErr := r.Status().Update(ctx, exporter); updateErr != nil {
 			logger.Error(updateErr, "Failed to update status")
 		}
-		return ctrl.Result{RequeueAfter: 1 * time.Minute}, fmt.Errorf("Central connection test failed")
+
+		// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped at 1 minute)
+		backoffSeconds := 1 << (exporter.Status.ConsecutiveConnectionFailures - 1) // 2^(n-1)
+		if backoffSeconds > 60 {                                                    // Cap at 1 minute
+			backoffSeconds = 60
+		}
+		backoffInterval := time.Duration(backoffSeconds) * time.Second
+		logger.Info("Applying exponential backoff for connection failure",
+			"consecutiveConnectionFailures", exporter.Status.ConsecutiveConnectionFailures,
+			"interval", backoffInterval)
+
+		return ctrl.Result{RequeueAfter: backoffInterval}, fmt.Errorf("Central connection test failed")
 	}
 
+	// Connection successful - reset failure counter
+	exporter.Status.ConsecutiveConnectionFailures = 0
 	logger.Info("Successfully connected to Central")
 	r.setCondition(exporter, TypeCentralConnected, metav1.ConditionTrue,
 		"Connected", "Successfully connected to Central")

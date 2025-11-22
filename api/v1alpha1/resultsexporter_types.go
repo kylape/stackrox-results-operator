@@ -229,6 +229,10 @@ type ResultsExporterStatus struct {
 	// +optional
 	ConsecutiveFailures int `json:"consecutiveFailures,omitempty"`
 
+	// Consecutive connection failures
+	// +optional
+	ConsecutiveConnectionFailures int `json:"consecutiveConnectionFailures,omitempty"`
+
 	// Observed generation
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`

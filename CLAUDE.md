@@ -38,7 +38,7 @@ This session uses a kind cluster with a local Docker registry at `localhost:5001
 
 ```bash
 export IMG_REGISTRY="localhost:5001/stackrox"
-export VERSION=v16  # Increment for each build
+export VERSION=latest
 ```
 
 ### 1. Make Code Changes
