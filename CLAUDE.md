@@ -51,9 +51,7 @@ Edit files in:
 ### 2. Build the Operator Image
 
 ```bash
-# Increment version number (e.g., v16 -> v17)
-export VERSION=v17
-make docker-build IMG=${IMG_REGISTRY}/results-operator:${VERSION}
+podman build -t localhost:5001/stackrox-results-operator:latest .
 ```
 
 This uses docker/podman to build the multi-stage Dockerfile:
@@ -65,9 +63,14 @@ This uses docker/podman to build the multi-stage Dockerfile:
 **For localhost:5001 registry (current setup):**
 
 ```bash
-# Push with TLS verification disabled (local HTTP registry)
-docker push ${IMG_REGISTRY}/results-operator:${VERSION} --tls-verify=false
+podman push --tls-verify=false localhost:5001/stackrox-results-operator:latest
 ```
+
+**IMPORTANT**: With kind clusters, there are TWO different registry addresses:
+- **`localhost:5001`** - Used from your host machine when pushing images
+- **`kind-registry:5000`** - Used from inside the kind cluster when pulling images
+
+The kind registry proxy listens on `localhost:5001` externally but is accessible as `kind-registry:5000` from within the cluster.
 
 **For remote clusters (OpenShift, etc.):**
 
@@ -76,24 +79,16 @@ docker push ${IMG_REGISTRY}/results-operator:${VERSION} --tls-verify=false
 podman push ${IMG_REGISTRY}/results-operator:${VERSION}
 ```
 
-**For kind clusters with `kind load`:**
-
-```bash
-# Load directly into kind cluster (no push needed)
-kind load docker-image ${IMG_REGISTRY}/results-operator:${VERSION} --name ${KIND_CLUSTER}
-```
-
 ### 4. Update the Deployment
 
 ```bash
 # Update the operator deployment to use new image
+# NOTE: Use kind-registry:5000 (not localhost:5001) for the cluster-internal reference
 kubectl set image deployment/stackrox-results-operator-controller-manager \
-  manager=${IMG_REGISTRY}/results-operator:${VERSION} \
+  manager=kind-registry:5000/stackrox-results-operator:latest \
   -n stackrox-results-operator-system
 
-# Wait for rollout to complete
-kubectl rollout status deployment/stackrox-results-operator-controller-manager \
-  -n stackrox-results-operator-system
+kubectl -n stackrox-results-operator-system delete pod -l app.kubernetes.io/name=stackrox-results-operator
 ```
 
 ### 5. Trigger Resync (Optional)
