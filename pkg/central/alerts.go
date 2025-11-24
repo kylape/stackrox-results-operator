@@ -129,7 +129,7 @@ func (c *Client) ListAlerts(ctx context.Context, opts ListAlertsOptions) ([]*sto
 func (c *Client) ListAllAlerts(ctx context.Context, opts ListAlertsOptions) ([]*storage.ListAlert, error) {
 	const pageSize = 1000
 	const maxConcurrency = 5
-	const maxPages = 20 // Support up to 20k alerts
+	const maxPages = 5 // Support up to 5k alerts (reduced to prevent context timeout)
 
 	type pageResult struct {
 		alerts []*storage.ListAlert

@@ -235,8 +235,13 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 
 		// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped at 1 minute)
-		backoffSeconds := 1 << (exporter.Status.ConsecutiveConnectionFailures - 1) // 2^(n-1)
-		if backoffSeconds > 60 {                                                    // Cap at 1 minute
+		// Cap failures counter to prevent bitshift overflow (max 2^6 = 64 seconds > 60)
+		failures := exporter.Status.ConsecutiveConnectionFailures
+		if failures > 7 {
+			failures = 7
+		}
+		backoffSeconds := 1 << (failures - 1) // 2^(n-1)
+		if backoffSeconds > 60 {              // Cap at 1 minute
 			backoffSeconds = 60
 		}
 		backoffInterval := time.Duration(backoffSeconds) * time.Second
@@ -260,8 +265,13 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 
 		// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped at 1 minute)
-		backoffSeconds := 1 << (exporter.Status.ConsecutiveConnectionFailures - 1) // 2^(n-1)
-		if backoffSeconds > 60 {                                                    // Cap at 1 minute
+		// Cap failures counter to prevent bitshift overflow (max 2^6 = 64 seconds > 60)
+		failures := exporter.Status.ConsecutiveConnectionFailures
+		if failures > 7 {
+			failures = 7
+		}
+		backoffSeconds := 1 << (failures - 1) // 2^(n-1)
+		if backoffSeconds > 60 {              // Cap at 1 minute
 			backoffSeconds = 60
 		}
 		backoffInterval := time.Duration(backoffSeconds) * time.Second
@@ -343,8 +353,13 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if syncErr != nil && exporter.Status.ConsecutiveFailures > 0 {
 		// Exponential backoff on failures: 1s, 2s, 4s, 8s, 16s, ... up to 1 hour
 		// Formula: 2^(failures-1) seconds, capped at 3600 seconds (1 hour)
-		backoffSeconds := 1 << (exporter.Status.ConsecutiveFailures - 1) // 2^(n-1)
-		if backoffSeconds > 3600 {                                       // Cap at 1 hour
+		// Cap failures counter to prevent bitshift overflow (max 2^11 = 2048 seconds < 3600)
+		failures := exporter.Status.ConsecutiveFailures
+		if failures > 12 {
+			failures = 12
+		}
+		backoffSeconds := 1 << (failures - 1) // 2^(n-1)
+		if backoffSeconds > 3600 {            // Cap at 1 hour
 			backoffSeconds = 3600
 		}
 		syncInterval = time.Duration(backoffSeconds) * time.Second
@@ -1656,6 +1671,70 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 		details.CVEsTruncated = maxCVEsTotal
 	} else {
 		details.CVEsTruncated = totalCVEs
+	}
+
+	// Recalculate img.Summary to match truncated CVE arrays
+	// This ensures the summary counts reflect the actual data stored in the CR
+	for i := range status.ImageVulnerabilities {
+		img := &status.ImageVulnerabilities[i]
+		if img.Summary.Total == len(img.CVEs) {
+			// Summary already matches, no need to recalculate
+			continue
+		}
+
+		// Recalculate summary from truncated CVEs
+		summary := &securityv1alpha1.VulnerabilitySummary{}
+		criticalCount := &securityv1alpha1.SeverityCount{}
+		highCount := &securityv1alpha1.SeverityCount{}
+		mediumCount := &securityv1alpha1.SeverityCount{}
+		lowCount := &securityv1alpha1.SeverityCount{}
+
+		for _, cve := range img.CVEs {
+			summary.Total++
+			if cve.Fixable {
+				summary.FixableTotal++
+			}
+
+			// Count by severity
+			switch cve.Severity {
+			case "CRITICAL":
+				criticalCount.Total++
+				if cve.Fixable {
+					criticalCount.Fixable++
+				}
+			case "HIGH":
+				highCount.Total++
+				if cve.Fixable {
+					highCount.Fixable++
+				}
+			case "MEDIUM":
+				mediumCount.Total++
+				if cve.Fixable {
+					mediumCount.Fixable++
+				}
+			case "LOW", "UNKNOWN":
+				lowCount.Total++
+				if cve.Fixable {
+					lowCount.Fixable++
+				}
+			}
+		}
+
+		// Only include severity counts if non-zero
+		if criticalCount.Total > 0 {
+			summary.Critical = criticalCount
+		}
+		if highCount.Total > 0 {
+			summary.High = highCount
+		}
+		if mediumCount.Total > 0 {
+			summary.Medium = mediumCount
+		}
+		if lowCount.Total > 0 {
+			summary.Low = lowCount
+		}
+
+		img.Summary = *summary
 	}
 
 	return details
