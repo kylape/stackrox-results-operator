@@ -1634,6 +1634,12 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 	}
 	details.ImagesTruncated = len(status.ImageVulnerabilities)
 
+	// Sort CVEs by criticality before truncation
+	// This ensures we keep the most critical CVEs when we hit limits
+	for i := range status.ImageVulnerabilities {
+		r.sortCVEsBySeverity(status.ImageVulnerabilities[i].CVEs)
+	}
+
 	// Count and truncate total CVEs across all images
 	totalCVEs := 0
 	for _, img := range status.ImageVulnerabilities {
@@ -1738,6 +1744,66 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 	}
 
 	return details
+}
+
+// sortCVEsBySeverity sorts CVEs by severity (CRITICAL > HIGH > MEDIUM > LOW/UNKNOWN)
+// and within same severity by CVSS score (descending)
+func (r *ResultsExporterReconciler) sortCVEsBySeverity(cves []securityv1alpha1.CVE) {
+	// Define severity priority (lower number = higher priority)
+	severityPriority := map[string]int{
+		"CRITICAL": 1,
+		"HIGH":     2,
+		"MEDIUM":   3,
+		"LOW":      4,
+		"UNKNOWN":  5,
+	}
+
+	// Sort using custom comparator
+	for i := 0; i < len(cves); i++ {
+		for j := i + 1; j < len(cves); j++ {
+			// Get severity priorities
+			priorityI := severityPriority[cves[i].Severity]
+			priorityJ := severityPriority[cves[j].Severity]
+
+			// If no priority found, treat as lowest (UNKNOWN)
+			if priorityI == 0 {
+				priorityI = 5
+			}
+			if priorityJ == 0 {
+				priorityJ = 5
+			}
+
+			shouldSwap := false
+
+			// First compare by severity
+			if priorityI > priorityJ {
+				shouldSwap = true
+			} else if priorityI == priorityJ {
+				// Same severity - compare by CVSS score (higher score first)
+				// Parse CVSS scores
+				cvssI := 0.0
+				cvssJ := 0.0
+				if cves[i].CVSSv3 != nil {
+					fmt.Sscanf(cves[i].CVSSv3.Score, "%f", &cvssI)
+				} else if cves[i].CVSS != "" {
+					fmt.Sscanf(cves[i].CVSS, "%f", &cvssI)
+				}
+				if cves[j].CVSSv3 != nil {
+					fmt.Sscanf(cves[j].CVSSv3.Score, "%f", &cvssJ)
+				} else if cves[j].CVSS != "" {
+					fmt.Sscanf(cves[j].CVSS, "%f", &cvssJ)
+				}
+
+				if cvssI < cvssJ {
+					shouldSwap = true
+				}
+			}
+
+			if shouldSwap {
+				cves[i], cves[j] = cves[j], cves[i]
+			}
+		}
+	}
 }
 
 // setCondition sets a condition on the ResultsExporter status
