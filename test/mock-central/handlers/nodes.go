@@ -49,6 +49,11 @@ func NewNodesHandler(store *storage.MemoryStore) http.HandlerFunc {
 			return
 		}
 
+		// Parse query filters
+		query := r.URL.Query()
+		queryStr := query.Get("query")
+		filters := ParseQuery(queryStr)
+
 		// Parse nodes data to filter by cluster
 		var allNodes struct {
 			Nodes []map[string]interface{} `json:"nodes"`
@@ -58,11 +63,15 @@ func NewNodesHandler(store *storage.MemoryStore) http.HandlerFunc {
 			return
 		}
 
-		// Filter nodes for this cluster
+		// Filter nodes for this cluster and apply query filters
 		filteredNodes := []map[string]interface{}{}
 		for _, node := range allNodes.Nodes {
+			// Filter by cluster ID
 			if nodeClusterID, ok := node["clusterId"].(string); ok && nodeClusterID == clusterID {
-				filteredNodes = append(filteredNodes, node)
+				// Apply additional query filters
+				if matchesNodeFilters(node, filters) {
+					filteredNodes = append(filteredNodes, node)
+				}
 			}
 		}
 
@@ -74,4 +83,64 @@ func NewNodesHandler(store *storage.MemoryStore) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}
+}
+
+// matchesNodeFilters checks if a node matches the query filters
+func matchesNodeFilters(node map[string]interface{}, filters []QueryFilter) bool {
+	for _, filter := range filters {
+		switch filter.Field {
+		case "CVE Severity":
+			// Check if node has at least one CVE with the specified severity or higher
+			if !nodeHasCVESeverity(node, filter.Value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// nodeHasCVESeverity checks if a node has at least one CVE with the specified severity or higher
+func nodeHasCVESeverity(node map[string]interface{}, minSeverity string) bool {
+	scan, ok := node["scan"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	components, ok := scan["components"].([]interface{})
+	if !ok {
+		return false
+	}
+
+	minLevel := ParseSeverity(minSeverity)
+
+	for _, comp := range components {
+		component, ok := comp.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		vulns, ok := component["vulnerabilities"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, v := range vulns {
+			vuln, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			severity, ok := vuln["severity"].(string)
+			if !ok {
+				continue
+			}
+
+			vulnLevel := ParseSeverity(severity)
+			if vulnLevel >= minLevel {
+				return true
+			}
+		}
+	}
+
+	return false
 }

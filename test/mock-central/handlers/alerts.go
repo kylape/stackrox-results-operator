@@ -2,11 +2,27 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/kylape/stackrox-results-operator/test/mock-central/storage"
 )
+
+// Alert represents a simplified alert structure for filtering
+type Alert struct {
+	ID         string                 `json:"id"`
+	Policy     map[string]interface{} `json:"policy"`
+	Deployment map[string]interface{} `json:"deployment"`
+	Resource   map[string]interface{} `json:"resource"`
+	CommonEntityInfo map[string]interface{} `json:"commonEntityInfo"`
+	LifecycleStage string `json:"lifecycleStage"`
+	State      string                 `json:"state"`
+	Time       string                 `json:"time"`
+	Raw        json.RawMessage        // Store original JSON for output
+}
 
 // NewAlertsHandler returns a handler for /v1/alerts
 func NewAlertsHandler(store *storage.MemoryStore) http.HandlerFunc {
@@ -40,7 +56,11 @@ func NewAlertsHandler(store *storage.MemoryStore) http.HandlerFunc {
 			}
 		}
 
-		// Parse the JSON to apply pagination
+		// Parse query filters
+		queryStr := query.Get("query")
+		filters := ParseQuery(queryStr)
+
+		// Parse the JSON to apply filtering
 		var alertsResponse struct {
 			Alerts []json.RawMessage `json:"alerts"`
 		}
@@ -50,7 +70,30 @@ func NewAlertsHandler(store *storage.MemoryStore) http.HandlerFunc {
 			return
 		}
 
-		totalAlerts := len(alertsResponse.Alerts)
+		// Parse alerts and apply filters
+		var filteredAlerts []json.RawMessage
+		for _, alertJSON := range alertsResponse.Alerts {
+			var alert Alert
+			if err := json.Unmarshal(alertJSON, &alert); err != nil {
+				continue
+			}
+			alert.Raw = alertJSON
+
+			// Apply filters
+			if !matchesAlertFilters(alert, filters) {
+				continue
+			}
+
+			filteredAlerts = append(filteredAlerts, alert.Raw)
+		}
+
+		// Sort by time (newest first) if requested or by default
+		sortStr := query.Get("sortOption.field")
+		if sortStr == "" || sortStr == "Alert Time" {
+			sortAlertsByTime(filteredAlerts)
+		}
+
+		totalAlerts := len(filteredAlerts)
 
 		// Apply offset
 		if offset >= totalAlerts {
@@ -67,7 +110,7 @@ func NewAlertsHandler(store *storage.MemoryStore) http.HandlerFunc {
 		}
 
 		// Slice alerts based on pagination
-		paginatedAlerts := alertsResponse.Alerts[offset:end]
+		paginatedAlerts := filteredAlerts[offset:end]
 
 		// Create response
 		response := map[string]interface{}{
@@ -77,4 +120,109 @@ func NewAlertsHandler(store *storage.MemoryStore) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}
+}
+
+// matchesAlertFilters checks if an alert matches the query filters
+// Multiple filters for the SAME field are OR'd together
+// Filters for DIFFERENT fields are AND'd together
+func matchesAlertFilters(alert Alert, filters []QueryFilter) bool {
+	// Group filters by field
+	filtersByField := make(map[string][]string)
+	for _, filter := range filters {
+		filtersByField[filter.Field] = append(filtersByField[filter.Field], filter.Value)
+	}
+
+	// Check each field (AND across fields)
+	for field, values := range filtersByField {
+		matched := false
+
+		switch field {
+		case "Namespace":
+			namespace := extractAlertNamespace(alert)
+			// OR across multiple namespace values
+			for _, value := range values {
+				if namespace == value {
+					matched = true
+					break
+				}
+			}
+
+		case "Severity":
+			severity := extractAlertSeverity(alert)
+			// OR across multiple severity values (MEDIUM, HIGH, CRITICAL)
+			for _, value := range values {
+				if strings.EqualFold(severity, value) {
+					matched = true
+					break
+				}
+			}
+
+		case "Lifecycle Stage":
+			// OR across multiple lifecycle stage values
+			for _, value := range values {
+				if strings.EqualFold(alert.LifecycleStage, value) {
+					matched = true
+					break
+				}
+			}
+
+		case "Violation State":
+			// OR across multiple state values
+			for _, value := range values {
+				if value == "ACTIVE" && strings.EqualFold(alert.State, "ACTIVE") {
+					matched = true
+					break
+				}
+			}
+		}
+
+		// If this field didn't match any of its values, fail (AND across fields)
+		if !matched {
+			return false
+		}
+	}
+
+	return true
+}
+
+// extractAlertNamespace extracts the namespace from an alert
+func extractAlertNamespace(alert Alert) string {
+	// Check deployment first
+	if alert.Deployment != nil {
+		if ns, ok := alert.Deployment["namespace"].(string); ok && ns != "" {
+			return ns
+		}
+	}
+	// Check common entity info
+	if alert.CommonEntityInfo != nil {
+		if ns, ok := alert.CommonEntityInfo["namespace"].(string); ok && ns != "" {
+			return ns
+		}
+	}
+	return ""
+}
+
+// extractAlertSeverity extracts the severity from an alert's policy
+func extractAlertSeverity(alert Alert) string {
+	if alert.Policy != nil {
+		if severity, ok := alert.Policy["severity"].(string); ok {
+			// Normalize severity (remove _SEVERITY suffix if present)
+			severity = strings.ToUpper(severity)
+			severity = strings.TrimSuffix(severity, "_SEVERITY")
+			return severity
+		}
+	}
+	return ""
+}
+
+// sortAlertsByTime sorts alerts by time (newest first)
+func sortAlertsByTime(alerts []json.RawMessage) {
+	sort.Slice(alerts, func(i, j int) bool {
+		var alertI, alertJ Alert
+		json.Unmarshal(alerts[i], &alertI)
+		json.Unmarshal(alerts[j], &alertJ)
+
+		// Compare times (newer first, so j < i)
+		return alertJ.Time < alertI.Time
+	})
 }

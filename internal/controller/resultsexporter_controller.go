@@ -236,14 +236,10 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 		// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped at 1 minute)
 		// Cap failures counter to prevent bitshift overflow (max 2^6 = 64 seconds > 60)
-		failures := exporter.Status.ConsecutiveConnectionFailures
-		if failures > 7 {
-			failures = 7
-		}
-		backoffSeconds := 1 << (failures - 1) // 2^(n-1)
-		if backoffSeconds > 60 {              // Cap at 1 minute
-			backoffSeconds = 60
-		}
+		failures := min(exporter.Status.ConsecutiveConnectionFailures, 7)
+
+		backoffSeconds := min(1<<(failures-1), 60) // 2^(n-1)
+
 		backoffInterval := time.Duration(backoffSeconds) * time.Second
 		logger.Info("Applying exponential backoff for connection failure",
 			"consecutiveConnectionFailures", exporter.Status.ConsecutiveConnectionFailures,
@@ -266,14 +262,9 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 		// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped at 1 minute)
 		// Cap failures counter to prevent bitshift overflow (max 2^6 = 64 seconds > 60)
-		failures := exporter.Status.ConsecutiveConnectionFailures
-		if failures > 7 {
-			failures = 7
-		}
-		backoffSeconds := 1 << (failures - 1) // 2^(n-1)
-		if backoffSeconds > 60 {              // Cap at 1 minute
-			backoffSeconds = 60
-		}
+		failures := min(exporter.Status.ConsecutiveConnectionFailures, 7)
+		backoffSeconds := min(1<<(failures-1), 60) // 2^(n-1)
+
 		backoffInterval := time.Duration(backoffSeconds) * time.Second
 		logger.Info("Applying exponential backoff for connection failure",
 			"consecutiveConnectionFailures", exporter.Status.ConsecutiveConnectionFailures,
@@ -293,10 +284,6 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	r.setCondition(exporter, TypeSyncing, metav1.ConditionTrue,
 		"SyncInProgress", "Syncing data from Central")
 	exporter.Status.LastSyncTime = &metav1.Time{Time: syncStartTime}
-
-	if err := r.Status().Update(ctx, exporter); err != nil {
-		logger.Error(err, "Failed to update status before sync")
-	}
 
 	// Perform sync based on mode
 	exportCounts, dataTruncated, syncErr := r.syncData(ctx, exporter, centralClient)
@@ -354,14 +341,8 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Exponential backoff on failures: 1s, 2s, 4s, 8s, 16s, ... up to 1 hour
 		// Formula: 2^(failures-1) seconds, capped at 3600 seconds (1 hour)
 		// Cap failures counter to prevent bitshift overflow (max 2^11 = 2048 seconds < 3600)
-		failures := exporter.Status.ConsecutiveFailures
-		if failures > 12 {
-			failures = 12
-		}
-		backoffSeconds := 1 << (failures - 1) // 2^(n-1)
-		if backoffSeconds > 3600 {            // Cap at 1 hour
-			backoffSeconds = 3600
-		}
+		failures := min(exporter.Status.ConsecutiveFailures, 12)
+		backoffSeconds := min(1<<(failures-1), 3600) // 2^(n-1)
 		syncInterval = time.Duration(backoffSeconds) * time.Second
 		logger.Info("Applying exponential backoff due to failures",
 			"consecutiveFailures", exporter.Status.ConsecutiveFailures,
@@ -1595,8 +1576,8 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 	config := exporter.Spec.Exports
 
 	// Get limits with defaults
-	maxAlerts := 100 // default
-	maxImages := 100 // default
+	maxAlerts := 100     // default
+	maxImages := 100     // default
 	maxCVEsTotal := 5000 // default
 
 	if config.Alerts != nil && config.Alerts.MaxPerNamespace > 0 {
@@ -1610,8 +1591,8 @@ func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context,
 	}
 
 	details := &TruncationDetails{
-		AlertsOriginal:  len(status.Alerts),
-		ImagesOriginal:  len(status.ImageVulnerabilities),
+		AlertsOriginal: len(status.Alerts),
+		ImagesOriginal: len(status.ImageVulnerabilities),
 	}
 
 	// Truncate alerts
