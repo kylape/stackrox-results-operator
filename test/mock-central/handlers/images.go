@@ -240,4 +240,3 @@ func filterImage(image Image, filters []QueryFilter) (Image, bool) {
 
 	return filteredImage, true
 }
-

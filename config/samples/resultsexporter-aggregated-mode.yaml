@@ -22,7 +22,7 @@ spec:
     imageVulnerabilities:
       enabled: true
       filters:
-        minSeverity: HIGH
+        minSeverity: MEDIUM
         fixableOnly: false
         maxCVEsPerResource: 50
       maxImages: 10000

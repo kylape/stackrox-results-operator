@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,15 +13,15 @@ import (
 
 // Alert represents a simplified alert structure for filtering
 type Alert struct {
-	ID         string                 `json:"id"`
-	Policy     map[string]interface{} `json:"policy"`
-	Deployment map[string]interface{} `json:"deployment"`
-	Resource   map[string]interface{} `json:"resource"`
+	ID               string                 `json:"id"`
+	Policy           map[string]interface{} `json:"policy"`
+	Deployment       map[string]interface{} `json:"deployment"`
+	Resource         map[string]interface{} `json:"resource"`
 	CommonEntityInfo map[string]interface{} `json:"commonEntityInfo"`
-	LifecycleStage string `json:"lifecycleStage"`
-	State      string                 `json:"state"`
-	Time       string                 `json:"time"`
-	Raw        json.RawMessage        // Store original JSON for output
+	LifecycleStage   string                 `json:"lifecycleStage"`
+	State            string                 `json:"state"`
+	Time             string                 `json:"time"`
+	Raw              json.RawMessage        // Store original JSON for output
 }
 
 // NewAlertsHandler returns a handler for /v1/alerts
@@ -70,9 +70,14 @@ func NewAlertsHandler(store *storage.MemoryStore) http.HandlerFunc {
 			return
 		}
 
-		// Parse alerts and apply filters
-		var filteredAlerts []json.RawMessage
-		for _, alertJSON := range alertsResponse.Alerts {
+		// Parse alerts and apply filters, extracting time for efficient sorting
+		type alertWithTime struct {
+			raw  json.RawMessage
+			time string
+		}
+		var filteredAlerts []alertWithTime
+
+		for i, alertJSON := range alertsResponse.Alerts {
 			var alert Alert
 			if err := json.Unmarshal(alertJSON, &alert); err != nil {
 				continue
@@ -84,13 +89,19 @@ func NewAlertsHandler(store *storage.MemoryStore) http.HandlerFunc {
 				continue
 			}
 
-			filteredAlerts = append(filteredAlerts, alert.Raw)
+			filteredAlerts = append(filteredAlerts, alertWithTime{
+				raw:  alert.Raw,
+				time: alert.Time,
+			})
 		}
 
 		// Sort by time (newest first) if requested or by default
 		sortStr := query.Get("sortOption.field")
 		if sortStr == "" || sortStr == "Alert Time" {
-			sortAlertsByTime(filteredAlerts)
+			sort.Slice(filteredAlerts, func(i, j int) bool {
+				// Newer first, so j < i
+				return filteredAlerts[j].time < filteredAlerts[i].time
+			})
 		}
 
 		totalAlerts := len(filteredAlerts)
@@ -109,12 +120,15 @@ func NewAlertsHandler(store *storage.MemoryStore) http.HandlerFunc {
 			end = totalAlerts
 		}
 
-		// Slice alerts based on pagination
-		paginatedAlerts := filteredAlerts[offset:end]
+		// Slice alerts based on pagination and extract raw JSON
+		paginatedAlertsRaw := make([]json.RawMessage, end-offset)
+		for i, awt := range filteredAlerts[offset:end] {
+			paginatedAlertsRaw[i] = awt.raw
+		}
 
 		// Create response
 		response := map[string]interface{}{
-			"alerts": paginatedAlerts,
+			"alerts": paginatedAlertsRaw,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -140,11 +154,8 @@ func matchesAlertFilters(alert Alert, filters []QueryFilter) bool {
 		case "Namespace":
 			namespace := extractAlertNamespace(alert)
 			// OR across multiple namespace values
-			for _, value := range values {
-				if namespace == value {
-					matched = true
-					break
-				}
+			if slices.Contains(values, namespace) {
+				matched = true
 			}
 
 		case "Severity":
@@ -213,16 +224,4 @@ func extractAlertSeverity(alert Alert) string {
 		}
 	}
 	return ""
-}
-
-// sortAlertsByTime sorts alerts by time (newest first)
-func sortAlertsByTime(alerts []json.RawMessage) {
-	sort.Slice(alerts, func(i, j int) bool {
-		var alertI, alertJ Alert
-		json.Unmarshal(alerts[i], &alertI)
-		json.Unmarshal(alerts[j], &alertJ)
-
-		// Compare times (newer first, so j < i)
-		return alertJ.Time < alertI.Time
-	})
 }

@@ -80,23 +80,23 @@ func HasFilter(filters []QueryFilter, field string) bool {
 type SeverityLevel int
 
 const (
-	SeverityUnknown SeverityLevel = 0
-	SeverityLow     SeverityLevel = 1
-	SeverityMedium  SeverityLevel = 2
-	SeverityHigh    SeverityLevel = 3
+	SeverityUnknown  SeverityLevel = 0
+	SeverityLow      SeverityLevel = 1
+	SeverityMedium   SeverityLevel = 2
+	SeverityHigh     SeverityLevel = 3
 	SeverityCritical SeverityLevel = 4
 )
 
 // ParseSeverity converts a severity string to a SeverityLevel
 func ParseSeverity(severity string) SeverityLevel {
 	switch strings.ToUpper(severity) {
-	case "CRITICAL", "CRITICAL_SEVERITY":
+	case "CRITICAL", "CRITICAL_SEVERITY", "CRITICAL_VULNERABILITY_SEVERITY":
 		return SeverityCritical
 	case "HIGH", "HIGH_SEVERITY", "IMPORTANT", "IMPORTANT_VULNERABILITY_SEVERITY":
 		return SeverityHigh
 	case "MEDIUM", "MEDIUM_SEVERITY", "MODERATE", "MODERATE_VULNERABILITY_SEVERITY":
 		return SeverityMedium
-	case "LOW", "LOW_SEVERITY":
+	case "LOW", "LOW_SEVERITY", "LOW_VULNERABILITY_SEVERITY":
 		return SeverityLow
 	default:
 		return SeverityUnknown

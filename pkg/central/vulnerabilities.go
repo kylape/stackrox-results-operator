@@ -55,10 +55,7 @@ func (c *Client) ListImages(ctx context.Context, opts ListImageVulnerabilitiesOp
 	}
 
 	if opts.MinSeverity != "" {
-		severityLevels := getSeverityLevelsAbove(opts.MinSeverity)
-		for _, sev := range severityLevels {
-			filters = append(filters, fmt.Sprintf("CVE Severity:%s", sev))
-		}
+		filters = append(filters, fmt.Sprintf("CVE Severity:%s", opts.MinSeverity))
 	}
 
 	if opts.FixableOnly {
