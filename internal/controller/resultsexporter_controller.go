@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -64,10 +65,10 @@ type ResultsExporterReconciler struct {
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=imagevulnerabilities/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=nodevulnerabilities,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=results.stackrox.io,resources=nodevulnerabilities/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=results.stackrox.io,resources=securityresults,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=results.stackrox.io,resources=securityresults/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=results.stackrox.io,resources=clustersecurityresults,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=results.stackrox.io,resources=clustersecurityresults/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=stackroxresults,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=stackroxresults/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=clusterstackroxresults,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=results.stackrox.io,resources=clusterstackroxresults/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
@@ -87,6 +88,20 @@ const (
 	// Default sync interval
 	defaultSyncInterval = 5 * time.Minute
 )
+
+// updateStatusWithRetry wraps Status().Update() with retry logic for conflict errors
+func (r *ResultsExporterReconciler) updateStatusWithRetry(ctx context.Context, obj client.Object) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return r.Status().Update(ctx, obj)
+	})
+}
+
+// updateWithRetry wraps Update() with retry logic for conflict errors
+func (r *ResultsExporterReconciler) updateWithRetry(ctx context.Context, obj client.Object) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return r.Update(ctx, obj)
+	})
+}
 
 // Reconcile implements the reconciliation loop for ResultsExporter
 func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -117,7 +132,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// Remove finalizer
 			logger.Info("Removing finalizer")
 			controllerutil.RemoveFinalizer(exporter, finalizerName)
-			if err := r.Update(ctx, exporter); err != nil {
+			if err := r.updateWithRetry(ctx, exporter); err != nil {
 				logger.Error(err, "Failed to remove finalizer")
 				return ctrl.Result{}, err
 			}
@@ -130,7 +145,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if !controllerutil.ContainsFinalizer(exporter, finalizerName) {
 		logger.Info("Adding finalizer")
 		controllerutil.AddFinalizer(exporter, finalizerName)
-		if err := r.Update(ctx, exporter); err != nil {
+		if err := r.updateWithRetry(ctx, exporter); err != nil {
 			logger.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
 		}
@@ -230,7 +245,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			"ConnectionFailed", fmt.Sprintf("Failed to connect to Central: %v", err))
 		r.setCondition(exporter, TypeReady, metav1.ConditionFalse,
 			"CentralConnectionFailed", "Cannot connect to Central")
-		if updateErr := r.Status().Update(ctx, exporter); updateErr != nil {
+		if updateErr := r.updateStatusWithRetry(ctx, exporter); updateErr != nil {
 			logger.Error(updateErr, "Failed to update status")
 		}
 
@@ -256,7 +271,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			"ConnectionTestFailed", fmt.Sprintf("Connection test failed: %v", err))
 		r.setCondition(exporter, TypeReady, metav1.ConditionFalse,
 			"CentralConnectionTestFailed", "Connection test to Central failed")
-		if updateErr := r.Status().Update(ctx, exporter); updateErr != nil {
+		if updateErr := r.updateStatusWithRetry(ctx, exporter); updateErr != nil {
 			logger.Error(updateErr, "Failed to update status")
 		}
 
@@ -296,7 +311,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Set DataTruncated condition
 	if dataTruncated {
 		r.setCondition(exporter, TypeDataTruncated, metav1.ConditionTrue,
-			"LimitsEnforced", "Data truncated in one or more namespaces to prevent exceeding etcd 3MB limit. Check SecurityResults conditions for details.")
+			"LimitsEnforced", "Data truncated in one or more namespaces to prevent exceeding etcd 3MB limit. Check StackRoxResults conditions for details.")
 	} else {
 		r.setCondition(exporter, TypeDataTruncated, metav1.ConditionFalse,
 			"NoTruncation", "All data exported without truncation")
@@ -329,7 +344,7 @@ func (r *ResultsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Update status
-	if err := r.Status().Update(ctx, exporter); err != nil {
+	if err := r.updateStatusWithRetry(ctx, exporter); err != nil {
 		logger.Error(err, "Failed to update status after sync")
 		return ctrl.Result{}, err
 	}
@@ -483,10 +498,10 @@ func (r *ResultsExporterReconciler) syncAggregatedMode(ctx context.Context, expo
 	counts := &resultsv1alpha1.ExportedResourceCounts{}
 	dataTruncated := false
 
-	// 1. Sync SecurityResults (namespace-scoped: alerts + image vulns)
-	truncated, err := r.syncSecurityResults(ctx, exporter, centralClient, counts)
+	// 1. Sync StackRoxResults (namespace-scoped: alerts + image vulns)
+	truncated, err := r.syncStackRoxResults(ctx, exporter, centralClient, counts)
 	if err != nil {
-		return counts, false, errors.Wrap(err, "failed to sync SecurityResults")
+		return counts, false, errors.Wrap(err, "failed to sync StackRoxResults")
 	}
 	if truncated {
 		dataTruncated = true
@@ -506,11 +521,11 @@ func (r *ResultsExporterReconciler) syncAggregatedMode(ctx context.Context, expo
 	return counts, dataTruncated, nil
 }
 
-// syncSecurityResults creates/updates SecurityResults CRs (one per namespace)
+// syncStackRoxResults creates/updates StackRoxResults CRs (one per namespace)
 // Returns (dataTruncated, error) where dataTruncated indicates if any data was truncated
-func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client, counts *resultsv1alpha1.ExportedResourceCounts) (bool, error) {
+func (r *ResultsExporterReconciler) syncStackRoxResults(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client, counts *resultsv1alpha1.ExportedResourceCounts) (bool, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Syncing SecurityResults")
+	logger.Info("Syncing StackRoxResults")
 
 	// Fetch alerts from Central
 	var alerts []*storage.ListAlert
@@ -555,26 +570,23 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 	}
 
 	// Group data by namespace
-	namespaceData := make(map[string]*securityv1alpha1.SecurityResultsStatus)
+	namespaceData := make(map[string]*securityv1alpha1.StackRoxResultsStatus)
 
 	// Group alerts by namespace
 	for _, alert := range alerts {
 		namespace := r.extractNamespaceFromAlert(alert)
 		if namespace == "" {
-			// Skip cluster-scoped alerts in SecurityResults (they don't belong to a namespace)
+			// Skip cluster-scoped alerts in StackRoxResults (they don't belong to a namespace)
 			continue
 		}
 
 		if namespaceData[namespace] == nil {
-			namespaceData[namespace] = &securityv1alpha1.SecurityResultsStatus{
-				Namespace: namespace,
-			}
+			namespaceData[namespace] = &securityv1alpha1.StackRoxResultsStatus{}
 		}
 
 		// Convert alert to AlertData
 		alertData := r.convertAlertToAlertData(alert)
 		namespaceData[namespace].Alerts = append(namespaceData[namespace].Alerts, alertData)
-		counts.Alerts++
 	}
 
 	// Query Central for deployments to determine which images are used in which namespaces
@@ -601,39 +613,49 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		"uniqueImages", len(uniqueImages))
 
 	// Group image vulnerabilities by namespace based on actual pod usage
-	matchedImages := 0
-	unmatchedImages := 0
+	imageAlreadyCounted := make(map[string]bool)
+
 	for _, img := range images {
 		if img == nil || img.GetName() == nil {
 			continue
 		}
 
-		// Convert image to ImageVulnerabilityData
 		imgData := r.convertImageToImageVulnData(img)
 		imageFullName := img.GetName().GetFullName()
 
-		// Add this image vulnerability to each namespace that uses it
+		// Add to each namespace that uses this image
 		addedToAnyNamespace := false
 		for ns, images := range imagesByNamespace {
 			if images[imageFullName] {
-				// Ensure namespace exists in namespaceData
 				if namespaceData[ns] == nil {
-					namespaceData[ns] = &securityv1alpha1.SecurityResultsStatus{
-						Namespace: ns,
-					}
+					namespaceData[ns] = &securityv1alpha1.StackRoxResultsStatus{}
 				}
 				namespaceData[ns].ImageVulnerabilities = append(namespaceData[ns].ImageVulnerabilities, imgData)
 				addedToAnyNamespace = true
 			}
 		}
 
-		if addedToAnyNamespace {
+		// Count each unique image only once for ResultsExporter
+		if addedToAnyNamespace && !imageAlreadyCounted[imageFullName] {
 			counts.ImageVulnerabilities++
-			matchedImages++
-		} else {
-			unmatchedImages++
+			imageAlreadyCounted[imageFullName] = true
+		} else if !addedToAnyNamespace {
 			logger.V(2).Info("Image vulnerability not matched to any namespace",
 				"imageName", imageFullName)
+		}
+	}
+
+	matchedImages := len(imageAlreadyCounted)
+	unmatchedImages := len(images) - matchedImages
+
+	// Count unique alerts across all namespaces for ResultsExporter status
+	uniqueAlertIDs := make(map[string]bool)
+	for _, nsData := range namespaceData {
+		for _, alert := range nsData.Alerts {
+			if !uniqueAlertIDs[alert.ID] {
+				uniqueAlertIDs[alert.ID] = true
+				counts.Alerts++
+			}
 		}
 	}
 
@@ -641,9 +663,10 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		"totalImages", len(images),
 		"matchedImages", matchedImages,
 		"unmatchedImages", unmatchedImages,
-		"uniqueDeployedImages", len(uniqueImages))
+		"uniqueDeployedImages", len(uniqueImages),
+		"uniqueAlerts", len(uniqueAlertIDs))
 
-	// Create/update SecurityResults CR for each namespace
+	// Create/update StackRoxResults CR for each namespace
 	now := metav1.Now()
 	dataTruncated := false
 	for namespace, status := range namespaceData {
@@ -651,7 +674,7 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		ns := &corev1.Namespace{}
 		if err := r.Get(ctx, client.ObjectKey{Name: namespace}, ns); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.Info("Skipping SecurityResults for non-existent namespace",
+				logger.Info("Skipping StackRoxResults for non-existent namespace",
 					"namespace", namespace,
 					"alertCount", len(status.Alerts),
 					"imageCount", len(status.ImageVulnerabilities))
@@ -668,20 +691,19 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 		}
 
 		// Calculate summary
-		summary := r.calculateSecurityResultsSummary(status)
+		summary := r.calculateStackRoxResultsSummary(status)
 
-		sr := &securityv1alpha1.SecurityResults{
+		sr := &securityv1alpha1.StackRoxResults{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "security-results",
+				Name:      "stackrox-results",
 				Namespace: namespace,
 				Labels: map[string]string{
 					"app.kubernetes.io/managed-by": "results-operator",
 					"results.stackrox.io/exporter": exporter.Name,
 				},
 			},
-			Spec: securityv1alpha1.SecurityResultsSpec{},
-			Status: securityv1alpha1.SecurityResultsStatus{
-				Namespace:            namespace,
+			Spec: securityv1alpha1.StackRoxResultsSpec{},
+			Status: securityv1alpha1.StackRoxResultsStatus{
 				Alerts:               status.Alerts,
 				ImageVulnerabilities: status.ImageVulnerabilities,
 				Summary:              summary,
@@ -689,46 +711,56 @@ func (r *ResultsExporterReconciler) syncSecurityResults(ctx context.Context, exp
 			},
 		}
 
-		// Set truncation condition on SecurityResults
+		// Set truncation condition on StackRoxResults
 		if truncDetails.HasTruncation() {
-			setSecurityResultsCondition(sr, TypeDataTruncated, metav1.ConditionTrue,
+			setStackRoxResultsCondition(sr, TypeDataTruncated, metav1.ConditionTrue,
 				"LimitsEnforced", truncDetails.FormatMessage())
 		} else {
-			setSecurityResultsCondition(sr, TypeDataTruncated, metav1.ConditionFalse,
+			setStackRoxResultsCondition(sr, TypeDataTruncated, metav1.ConditionFalse,
 				"NoTruncation", "All data exported without truncation")
 		}
 
 		// Create or update
-		existing := &securityv1alpha1.SecurityResults{}
-		err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "security-results"}, existing)
+		existing := &securityv1alpha1.StackRoxResults{}
+		err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "stackrox-results"}, existing)
 
 		if apierrors.IsNotFound(err) {
 			// Create new resource
 			if err := r.Create(ctx, sr); err != nil {
-				logger.Error(err, "Failed to create SecurityResults", "namespace", namespace)
+				logger.Error(err, "Failed to create StackRoxResults", "namespace", namespace)
 				continue
 			}
-			logger.V(1).Info("Created SecurityResults", "namespace", namespace)
+			logger.V(1).Info("Created StackRoxResults", "namespace", namespace)
 
-			// Update status subresource
-			if err := r.Status().Update(ctx, sr); err != nil {
-				logger.Error(err, "Failed to update SecurityResults status", "namespace", namespace)
+			// Update status subresource with retry
+			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				return r.Status().Update(ctx, sr)
+			}); err != nil {
+				logger.Error(err, "Failed to update StackRoxResults status", "namespace", namespace)
 			}
 		} else if err == nil {
-			// Update existing resource - only update status since Spec is empty
-			existing.Status = sr.Status
-			if err := r.Status().Update(ctx, existing); err != nil {
-				logger.Error(err, "Failed to update SecurityResults status", "namespace", namespace)
+			// Update existing resource - re-fetch and update to avoid conflicts
+			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				// Re-fetch to get latest resourceVersion
+				current := &securityv1alpha1.StackRoxResults{}
+				if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "stackrox-results"}, current); err != nil {
+					return err
+				}
+				// Update status with new data
+				current.Status = sr.Status
+				return r.Status().Update(ctx, current)
+			}); err != nil {
+				logger.Error(err, "Failed to update StackRoxResults status", "namespace", namespace)
 				continue
 			}
-			logger.V(1).Info("Updated SecurityResults", "namespace", namespace)
+			logger.V(1).Info("Updated StackRoxResults", "namespace", namespace)
 		} else {
-			logger.Error(err, "Failed to get SecurityResults", "namespace", namespace)
+			logger.Error(err, "Failed to get StackRoxResults", "namespace", namespace)
 			continue
 		}
 	}
 
-	logger.Info("Synced SecurityResults", "namespaces", len(namespaceData))
+	logger.Info("Synced StackRoxResults", "namespaces", len(namespaceData))
 	return dataTruncated, nil
 }
 
@@ -804,14 +836,22 @@ func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Conte
 		}
 		logger.Info("Created ClusterSecurityResults")
 
-		// Update status subresource
-		if err := r.Status().Update(ctx, csr); err != nil {
+		// Update status subresource with retry
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return r.Status().Update(ctx, csr)
+		}); err != nil {
 			return errors.Wrap(err, "failed to update ClusterSecurityResults status")
 		}
 	} else if err == nil {
-		// Update existing resource - only update status since Spec is empty
-		existing.Status = csr.Status
-		if err := r.Status().Update(ctx, existing); err != nil {
+		// Update existing resource - re-fetch and update to avoid conflicts
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			current := &securityv1alpha1.ClusterSecurityResults{}
+			if err := r.Get(ctx, client.ObjectKey{Name: "cluster-security-results"}, current); err != nil {
+				return err
+			}
+			current.Status = csr.Status
+			return r.Status().Update(ctx, current)
+		}); err != nil {
 			return errors.Wrap(err, "failed to update ClusterSecurityResults status")
 		}
 		logger.Info("Updated ClusterSecurityResults")
@@ -912,6 +952,11 @@ func (r *ResultsExporterReconciler) convertImageToImageVulnData(img *storage.Ima
 		imgData.CVEs = vuln.Status.CVEs[:cveCount]
 	}
 
+	// Copy scan notes
+	if len(vuln.Status.Notes) > 0 {
+		imgData.Notes = vuln.Status.Notes
+	}
+
 	return imgData
 }
 
@@ -1004,7 +1049,7 @@ func (r *ResultsExporterReconciler) calculateNodeVulnerabilitySummary(components
 	return summary
 }
 
-func (r *ResultsExporterReconciler) calculateSecurityResultsSummary(status *securityv1alpha1.SecurityResultsStatus) *securityv1alpha1.SecuritySummary {
+func (r *ResultsExporterReconciler) calculateStackRoxResultsSummary(status *securityv1alpha1.StackRoxResultsStatus) *securityv1alpha1.SecuritySummary {
 	summary := &securityv1alpha1.SecuritySummary{}
 
 	// Count alerts by severity
@@ -1122,16 +1167,27 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 				}
 				logger.V(1).Info("Created Alert CRD", "name", crd.Name, "namespace", crd.Namespace)
 
-				// Update status subresource
-				if err := r.Status().Update(ctx, crd); err != nil {
+				// Update status subresource with retry
+				if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					return r.Status().Update(ctx, crd)
+				}); err != nil {
 					logger.Error(err, "Failed to update Alert status", "name", crd.Name)
 					continue
 				}
 				createdCount++
 			} else if err == nil {
-				// Resource exists - update status subresource
-				crd.ResourceVersion = existing.ResourceVersion
-				if err := r.Status().Update(ctx, crd); err != nil {
+				// Resource exists - re-fetch and update to avoid conflicts
+				alertName := crd.Name
+				alertNamespace := crd.Namespace
+				alertStatus := crd.Status
+				if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					current := &securityv1alpha1.Alert{}
+					if err := r.Get(ctx, client.ObjectKey{Namespace: alertNamespace, Name: alertName}, current); err != nil {
+						return err
+					}
+					current.Status = alertStatus
+					return r.Status().Update(ctx, current)
+				}); err != nil {
 					logger.Error(err, "Failed to update Alert status", "name", crd.Name)
 					continue
 				}
@@ -1157,16 +1213,26 @@ func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, ex
 				}
 				logger.V(1).Info("Created ClusterAlert CRD", "name", crd.Name)
 
-				// Update status subresource
-				if err := r.Status().Update(ctx, crd); err != nil {
+				// Update status subresource with retry
+				if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					return r.Status().Update(ctx, crd)
+				}); err != nil {
 					logger.Error(err, "Failed to update ClusterAlert status", "name", crd.Name)
 					continue
 				}
 				createdCount++
 			} else if err == nil {
-				// Resource exists - update status subresource
-				crd.ResourceVersion = existing.ResourceVersion
-				if err := r.Status().Update(ctx, crd); err != nil {
+				// Resource exists - re-fetch and update to avoid conflicts
+				clusterAlertName := crd.Name
+				clusterAlertStatus := crd.Status
+				if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					current := &securityv1alpha1.ClusterAlert{}
+					if err := r.Get(ctx, client.ObjectKey{Name: clusterAlertName}, current); err != nil {
+						return err
+					}
+					current.Status = clusterAlertStatus
+					return r.Status().Update(ctx, current)
+				}); err != nil {
 					logger.Error(err, "Failed to update ClusterAlert status", "name", crd.Name)
 					continue
 				}
@@ -1253,16 +1319,26 @@ func (r *ResultsExporterReconciler) syncImageVulnerabilitiesIndividual(ctx conte
 			}
 			logger.V(1).Info("Created ImageVulnerability CRD", "name", crd.Name)
 
-			// Update status subresource
-			if err := r.Status().Update(ctx, crd); err != nil {
+			// Update status subresource with retry
+			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				return r.Status().Update(ctx, crd)
+			}); err != nil {
 				logger.Error(err, "Failed to update ImageVulnerability status", "name", crd.Name)
 				continue
 			}
 			createdCount++
 		} else if err == nil {
-			// Resource exists - update status subresource
-			crd.ResourceVersion = existing.ResourceVersion
-			if err := r.Status().Update(ctx, crd); err != nil {
+			// Resource exists - re-fetch and update to avoid conflicts
+			imageVulnName := crd.Name
+			imageVulnStatus := crd.Status
+			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				current := &securityv1alpha1.ImageVulnerability{}
+				if err := r.Get(ctx, client.ObjectKey{Name: imageVulnName}, current); err != nil {
+					return err
+				}
+				current.Status = imageVulnStatus
+				return r.Status().Update(ctx, current)
+			}); err != nil {
 				logger.Error(err, "Failed to update ImageVulnerability status", "name", crd.Name)
 				continue
 			}
@@ -1339,16 +1415,26 @@ func (r *ResultsExporterReconciler) syncNodeVulnerabilitiesIndividual(ctx contex
 			}
 			logger.V(1).Info("Created NodeVulnerability CRD", "name", crd.Name)
 
-			// Update status subresource
-			if err := r.Status().Update(ctx, crd); err != nil {
+			// Update status subresource with retry
+			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				return r.Status().Update(ctx, crd)
+			}); err != nil {
 				logger.Error(err, "Failed to update NodeVulnerability status", "name", crd.Name)
 				continue
 			}
 			createdCount++
 		} else if err == nil {
-			// Resource exists - update status subresource
-			crd.ResourceVersion = existing.ResourceVersion
-			if err := r.Status().Update(ctx, crd); err != nil {
+			// Resource exists - re-fetch and update to avoid conflicts
+			nodeVulnName := crd.Name
+			nodeVulnStatus := crd.Status
+			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				current := &securityv1alpha1.NodeVulnerability{}
+				if err := r.Get(ctx, client.ObjectKey{Name: nodeVulnName}, current); err != nil {
+					return err
+				}
+				current.Status = nodeVulnStatus
+				return r.Status().Update(ctx, current)
+			}); err != nil {
 				logger.Error(err, "Failed to update NodeVulnerability status", "name", crd.Name)
 				continue
 			}
@@ -1403,9 +1489,9 @@ func (r *ResultsExporterReconciler) cleanupAllManagedResources(ctx context.Conte
 		logger.Error(err, "Failed to delete NodeVulnerability resources")
 	}
 
-	// Delete all SecurityResults resources
-	if err := r.DeleteAllOf(ctx, &securityv1alpha1.SecurityResults{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
-		logger.Error(err, "Failed to delete SecurityResults resources")
+	// Delete all StackRoxResults resources
+	if err := r.DeleteAllOf(ctx, &securityv1alpha1.StackRoxResults{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
+		logger.Error(err, "Failed to delete StackRoxResults resources")
 	}
 
 	// Delete all ClusterSecurityResults resources
@@ -1570,7 +1656,7 @@ func (t *TruncationDetails) FormatMessage() string {
 
 // enforceAggregatedLimits truncates data to prevent exceeding etcd 3MB limit
 // Returns truncation details
-func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, namespace string, status *securityv1alpha1.SecurityResultsStatus) *TruncationDetails {
+func (r *ResultsExporterReconciler) enforceAggregatedLimits(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, namespace string, status *securityv1alpha1.StackRoxResultsStatus) *TruncationDetails {
 	logger := log.FromContext(ctx)
 
 	config := exporter.Spec.Exports
@@ -1801,8 +1887,8 @@ func (r *ResultsExporterReconciler) setCondition(exporter *resultsv1alpha1.Resul
 	meta.SetStatusCondition(&exporter.Status.Conditions, condition)
 }
 
-// setSecurityResultsCondition sets a condition on SecurityResults status
-func setSecurityResultsCondition(sr *securityv1alpha1.SecurityResults, conditionType string, status metav1.ConditionStatus, reason, message string) {
+// setStackRoxResultsCondition sets a condition on StackRoxResults status
+func setStackRoxResultsCondition(sr *securityv1alpha1.StackRoxResults, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
@@ -1819,10 +1905,10 @@ func setSecurityResultsCondition(sr *securityv1alpha1.SecurityResults, condition
 func (r *ResultsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&resultsv1alpha1.ResultsExporter{}).
-		// Watch SecurityResults - reconcile the owning exporter when they change
+		// Watch StackRoxResults - reconcile the owning exporter when they change
 		Watches(
-			&securityv1alpha1.SecurityResults{},
-			handler.EnqueueRequestsFromMapFunc(r.mapSecurityResultsToExporter),
+			&securityv1alpha1.StackRoxResults{},
+			handler.EnqueueRequestsFromMapFunc(r.mapStackRoxResultsToExporter),
 		).
 		// Watch ClusterSecurityResults - reconcile the owning exporter when they change
 		Watches(
@@ -1833,9 +1919,9 @@ func (r *ResultsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// mapSecurityResultsToExporter maps a SecurityResults CR to its owning ResultsExporter
-func (r *ResultsExporterReconciler) mapSecurityResultsToExporter(ctx context.Context, obj client.Object) []reconcile.Request {
-	sr, ok := obj.(*securityv1alpha1.SecurityResults)
+// mapStackRoxResultsToExporter maps a StackRoxResults CR to its owning ResultsExporter
+func (r *ResultsExporterReconciler) mapStackRoxResultsToExporter(ctx context.Context, obj client.Object) []reconcile.Request {
+	sr, ok := obj.(*securityv1alpha1.StackRoxResults)
 	if !ok {
 		return nil
 	}

@@ -8,7 +8,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
 spec:
   central:
-    endpoint: http://mock-central:443
+    endpoint: https://central.stackrox.svc:443
+    authSecretName: central-auth
+    authSecretNamespace: stackrox
     tlsConfig:
       insecureSkipVerify: true
   exports:

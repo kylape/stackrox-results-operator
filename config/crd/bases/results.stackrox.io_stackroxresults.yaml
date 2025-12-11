@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: securityresults.results.stackrox.io
+  name: stackroxresults.results.stackrox.io
 spec:
   group: results.stackrox.io
   names:
-    kind: SecurityResults
-    listKind: SecurityResultsList
-    plural: securityresults
-    singular: securityresults
+    kind: StackRoxResults
+    listKind: StackRoxResultsList
+    plural: stackroxresults
+    singular: stackroxresults
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -37,7 +37,7 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          SecurityResults is the Schema for the securityresults API
+          StackRoxResults is the Schema for the stackroxresults API
           This aggregates all security findings for a namespace into a single resource
         properties:
           apiVersion:
@@ -59,13 +59,13 @@ spec:
             type: object
           spec:
             description: |-
-              SecurityResultsSpec defines the desired state of SecurityResults
+              StackRoxResultsSpec defines the desired state of StackRoxResults
               NOTE: This is a read-only resource created by the operator.
               Spec is intentionally empty - all data is in Status.
             type: object
           status:
             description: |-
-              SecurityResultsStatus defines the observed state of SecurityResults
+              StackRoxResultsStatus defines the observed state of StackRoxResults
               This contains all the security finding data from StackRox Central
             properties:
               alerts:
@@ -175,7 +175,7 @@ spec:
                 type: array
               conditions:
                 description: |-
-                  Conditions represent the current state of the SecurityResults
+                  Conditions represent the current state of the StackRoxResults
 
                   Condition types:
                   - "DataTruncated": indicates if data was truncated to stay within limits
@@ -341,6 +341,12 @@ spec:
                       - name
                       - sha
                       type: object
+                    notes:
+                      description: Scan notes from Central (e.g., OS_UNAVAILABLE,
+                        PARTIAL_SCAN_DATA)
+                      items:
+                        type: string
+                      type: array
                     scanTime:
                       format: date-time
                       type: string
@@ -413,9 +419,6 @@ spec:
               lastUpdated:
                 description: Last update time
                 format: date-time
-                type: string
-              namespace:
-                description: Namespace this result applies to
                 type: string
               summary:
                 description: Summary counts

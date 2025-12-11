@@ -300,6 +300,16 @@ func ConvertImageToCRD(img *storage.Image, exporterName string) *securityv1alpha
 			vuln.Status.ScanTime = &t
 		}
 
+		// Extract scan notes
+		if len(scan.GetNotes()) > 0 {
+			notes := make([]string, 0, len(scan.GetNotes()))
+			for _, note := range scan.GetNotes() {
+				// Convert enum to string (e.g., "OS_UNAVAILABLE")
+				notes = append(notes, note.String())
+			}
+			vuln.Status.Notes = notes
+		}
+
 		// Extract all CVEs from components
 		allCVEs := make(map[string]*securityv1alpha1.CVE) // Deduplicate CVEs by ID
 		criticalCount := &securityv1alpha1.SeverityCount{}

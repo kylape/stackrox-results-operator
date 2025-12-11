@@ -167,6 +167,11 @@ spec:
                 - name
                 - sha
                 type: object
+              notes:
+                description: Scan notes from Central (e.g., OS_UNAVAILABLE, PARTIAL_SCAN_DATA)
+                items:
+                  type: string
+                type: array
               operatingSystem:
                 description: Operating system
                 type: string

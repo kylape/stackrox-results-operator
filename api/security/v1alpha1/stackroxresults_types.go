@@ -20,10 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// SecurityResultsSpec defines the desired state of SecurityResults
+// StackRoxResultsSpec defines the desired state of StackRoxResults
 // NOTE: This is a read-only resource created by the operator.
 // Spec is intentionally empty - all data is in Status.
-type SecurityResultsSpec struct {
+type StackRoxResultsSpec struct {
 	// This resource is managed by the operator and has no user-configurable spec.
 }
 
@@ -88,15 +88,15 @@ type ImageVulnerabilityData struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=50
 	CVEs []CVE `json:"cves,omitempty"`
+
+	// Scan notes from Central (e.g., OS_UNAVAILABLE, PARTIAL_SCAN_DATA)
+	// +optional
+	Notes []string `json:"notes,omitempty"`
 }
 
-// SecurityResultsStatus defines the observed state of SecurityResults
+// StackRoxResultsStatus defines the observed state of StackRoxResults
 // This contains all the security finding data from StackRox Central
-type SecurityResultsStatus struct {
-	// Namespace this result applies to
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-
+type StackRoxResultsStatus struct {
 	// All alerts in this namespace
 	// +optional
 	Alerts []AlertData `json:"alerts,omitempty"`
@@ -113,7 +113,7 @@ type SecurityResultsStatus struct {
 	// +optional
 	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
 
-	// Conditions represent the current state of the SecurityResults
+	// Conditions represent the current state of the StackRoxResults
 	//
 	// Condition types:
 	// - "DataTruncated": indicates if data was truncated to stay within limits
@@ -152,7 +152,7 @@ type SecuritySummary struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:path=securityresults,scope=Namespaced
+// +kubebuilder:resource:path=stackroxresults,scope=Namespaced
 // +kubebuilder:printcolumn:name="Critical Alerts",type=integer,JSONPath=`.status.summary.criticalAlerts`
 // +kubebuilder:printcolumn:name="High Alerts",type=integer,JSONPath=`.status.summary.highAlerts`
 // +kubebuilder:printcolumn:name="Total Alerts",type=integer,JSONPath=`.status.summary.totalAlerts`
@@ -160,25 +160,25 @@ type SecuritySummary struct {
 // +kubebuilder:printcolumn:name="Total CVEs",type=integer,JSONPath=`.status.summary.totalCVEs`
 // +kubebuilder:printcolumn:name="Last Updated",type=date,JSONPath=`.status.lastUpdated`
 
-// SecurityResults is the Schema for the securityresults API
+// StackRoxResults is the Schema for the stackroxresults API
 // This aggregates all security findings for a namespace into a single resource
-type SecurityResults struct {
+type StackRoxResults struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   SecurityResultsSpec   `json:"spec,omitempty"`
-	Status SecurityResultsStatus `json:"status,omitempty"`
+	Spec   StackRoxResultsSpec   `json:"spec,omitempty"`
+	Status StackRoxResultsStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// SecurityResultsList contains a list of SecurityResults
-type SecurityResultsList struct {
+// StackRoxResultsList contains a list of StackRoxResults
+type StackRoxResultsList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []SecurityResults `json:"items"`
+	Items           []StackRoxResults `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&SecurityResults{}, &SecurityResultsList{})
+	SchemeBuilder.Register(&StackRoxResults{}, &StackRoxResultsList{})
 }

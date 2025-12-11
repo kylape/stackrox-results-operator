@@ -18,11 +18,11 @@ rules:
   resources:
   - alerts
   - clusteralerts
-  - clustersecurityresults
+  - clusterstackroxresults
   - imagevulnerabilities
   - nodevulnerabilities
   - resultsexporters
-  - securityresults
+  - stackroxresults
   verbs:
   - create
   - delete
@@ -36,11 +36,11 @@ rules:
   resources:
   - alerts/status
   - clusteralerts/status
-  - clustersecurityresults/status
+  - clusterstackroxresults/status
   - imagevulnerabilities/status
   - nodevulnerabilities/status
   - resultsexporters/status
-  - securityresults/status
+  - stackroxresults/status
   verbs:
   - get
   - patch
