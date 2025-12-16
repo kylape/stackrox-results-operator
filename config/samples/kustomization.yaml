@@ -11,13 +11,8 @@ resources:
 # Example exported CRDs (what the operator creates)
 - example-alert.yaml                      # Individual Alert example
 - example-imagevulnerability.yaml         # Individual ImageVulnerability example
-- example-securityresults.yaml            # Aggregated SecurityResults example
+- example-stackroxresults.yaml            # Aggregated StackroxResults example
 
 # Legacy scaffolded samples (minimal examples)
 - results_v1alpha1_resultsexporter.yaml
-- security_v1alpha1_alert.yaml
-- security_v1alpha1_imagevulnerability.yaml
-- security_v1alpha1_nodevulnerability.yaml
-- security_v1alpha1_securityresults.yaml
-- security_v1alpha1_clustersecurityresults.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

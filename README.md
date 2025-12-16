@@ -61,8 +61,7 @@ redis-7-2-sha256-def456                redis:7.2                     0          
 
 Creates one CRD per namespace/cluster aggregating all findings:
 
-* `SecurityResults` - One per namespace with ALL alerts and image vulnerabilities
-* `ClusterSecurityResults` - One per cluster with ALL node vulnerabilities
+* `StackroxResults` - One per namespace with ALL alerts and image vulnerabilities
 
 **Pros:**
 * Scales to large clusters (50 CRDs instead of 5000)
@@ -388,8 +387,7 @@ kubectl get securityresults -A -o json \
 
 ### Aggregated CRDs (results.stackrox.io/v1alpha1)
 
-* **SecurityResults** (namespaced): All security findings for a namespace
-* **ClusterSecurityResults** (cluster-scoped): All node vulnerabilities cluster-wide
+* **StackroxResults** (namespaced): All security findings for a namespace
 
 ### Configuration CRD (results.stackrox.io/v1alpha1)
 

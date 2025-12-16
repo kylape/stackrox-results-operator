@@ -1,10 +1,10 @@
-# Example SecurityResults CRD (Aggregated Mode)
+# Example StackroxResults CRD (Aggregated Mode)
 # This is what the operator creates when exporting in aggregated mode
-# One SecurityResults per namespace containing ALL alerts and image vulnerabilities
+# One StackroxResults per namespace containing ALL alerts and image vulnerabilities
 # Created by the operator - users do not create these directly
 
 apiVersion: results.stackrox.io/v1alpha1
-kind: SecurityResults
+kind: StackroxResults
 metadata:
   name: production-results
   namespace: production

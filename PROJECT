@@ -48,15 +48,7 @@ resources:
     namespaced: true
   domain: stackrox.io
   group: security
-  kind: SecurityResults
-  path: github.com/kylape/stackrox-results-operator/api/security/v1alpha1
-  version: v1alpha1
-- api:
-    crdVersion: v1
-    namespaced: true
-  domain: stackrox.io
-  group: security
-  kind: ClusterSecurityResults
+  kind: StackroxResults
   path: github.com/kylape/stackrox-results-operator/api/security/v1alpha1
   version: v1alpha1
 version: "3"

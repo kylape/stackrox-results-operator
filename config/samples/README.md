@@ -37,8 +37,7 @@ kubectl get nodevulnerabilities
 
 Creates one CRD per namespace aggregating all findings for better scalability:
 
-* One `SecurityResults` per namespace (containing ALL alerts and image vulnerabilities)
-* One `ClusterSecurityResults` per cluster (containing ALL node vulnerabilities)
+* One `StackroxResults` per namespace (containing ALL alerts and image vulnerabilities)
 
 **Deploy:**
 

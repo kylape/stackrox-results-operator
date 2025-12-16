@@ -507,11 +507,6 @@ func (r *ResultsExporterReconciler) syncAggregatedMode(ctx context.Context, expo
 		dataTruncated = true
 	}
 
-	// 2. Sync ClusterSecurityResults (cluster-scoped: node vulns)
-	if err := r.syncClusterSecurityResults(ctx, exporter, centralClient, counts); err != nil {
-		return counts, dataTruncated, errors.Wrap(err, "failed to sync ClusterSecurityResults")
-	}
-
 	logger.Info("Completed aggregated mode sync",
 		"alerts", counts.Alerts,
 		"imageVulns", counts.ImageVulnerabilities,
@@ -764,104 +759,6 @@ func (r *ResultsExporterReconciler) syncStackRoxResults(ctx context.Context, exp
 	return dataTruncated, nil
 }
 
-// syncClusterSecurityResults creates/updates the ClusterSecurityResults CR
-func (r *ResultsExporterReconciler) syncClusterSecurityResults(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client, counts *resultsv1alpha1.ExportedResourceCounts) error {
-	logger := log.FromContext(ctx)
-	logger.Info("Syncing ClusterSecurityResults")
-
-	// Fetch node vulnerabilities from Central
-	var nodes []*storage.Node
-	if exporter.Spec.Exports.NodeVulnerabilities != nil && exporter.Spec.Exports.NodeVulnerabilities.Enabled {
-		config := exporter.Spec.Exports.NodeVulnerabilities
-
-		minSeverity := ""
-		maxCVEsPerNode := 50 // default
-		if config.Filters != nil {
-			minSeverity = config.Filters.MinSeverity
-			if config.Filters.MaxCVEsPerResource > 0 {
-				maxCVEsPerNode = config.Filters.MaxCVEsPerResource
-			}
-		}
-
-		var err error
-		nodes, err = centralClient.ListNodeVulnerabilities(ctx, minSeverity, maxCVEsPerNode)
-		if err != nil {
-			return errors.Wrap(err, "failed to list node vulnerabilities")
-		}
-		logger.Info("Retrieved node vulnerabilities from Central", "count", len(nodes))
-	}
-
-	if len(nodes) == 0 {
-		logger.Info("No node vulnerabilities to sync")
-		return nil
-	}
-
-	// Convert nodes to NodeVulnerabilityData
-	nodeData := make([]securityv1alpha1.NodeVulnerabilityData, 0, len(nodes))
-	for _, node := range nodes {
-		nodeData = append(nodeData, r.convertNodeToNodeVulnData(node))
-		counts.NodeVulnerabilities++
-	}
-
-	// Create/update ClusterSecurityResults
-	now := metav1.Now()
-
-	// Calculate summary from node data
-	summary := r.calculateClusterSecurityResultsSummary(nodeData)
-
-	csr := &securityv1alpha1.ClusterSecurityResults{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cluster-security-results",
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "results-operator",
-				"results.stackrox.io/exporter": exporter.Name,
-			},
-		},
-		Spec: securityv1alpha1.ClusterSecurityResultsSpec{},
-		Status: securityv1alpha1.ClusterSecurityResultsStatus{
-			NodeVulnerabilities: nodeData,
-			Summary:             summary,
-			LastUpdated:         &now,
-		},
-	}
-
-	// Create or update
-	existing := &securityv1alpha1.ClusterSecurityResults{}
-	err := r.Get(ctx, client.ObjectKey{Name: "cluster-security-results"}, existing)
-
-	if apierrors.IsNotFound(err) {
-		// Create new resource
-		if err := r.Create(ctx, csr); err != nil {
-			return errors.Wrap(err, "failed to create ClusterSecurityResults")
-		}
-		logger.Info("Created ClusterSecurityResults")
-
-		// Update status subresource with retry
-		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return r.Status().Update(ctx, csr)
-		}); err != nil {
-			return errors.Wrap(err, "failed to update ClusterSecurityResults status")
-		}
-	} else if err == nil {
-		// Update existing resource - re-fetch and update to avoid conflicts
-		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			current := &securityv1alpha1.ClusterSecurityResults{}
-			if err := r.Get(ctx, client.ObjectKey{Name: "cluster-security-results"}, current); err != nil {
-				return err
-			}
-			current.Status = csr.Status
-			return r.Status().Update(ctx, current)
-		}); err != nil {
-			return errors.Wrap(err, "failed to update ClusterSecurityResults status")
-		}
-		logger.Info("Updated ClusterSecurityResults")
-	} else {
-		return errors.Wrap(err, "failed to get ClusterSecurityResults")
-	}
-
-	return nil
-}
-
 // Helper functions for data conversion
 
 func (r *ResultsExporterReconciler) extractNamespaceFromAlert(alert *storage.ListAlert) string {
@@ -1077,29 +974,6 @@ func (r *ResultsExporterReconciler) calculateStackRoxResultsSummary(status *secu
 	return summary
 }
 
-func (r *ResultsExporterReconciler) calculateClusterSecurityResultsSummary(nodeVulnerabilities []securityv1alpha1.NodeVulnerabilityData) *securityv1alpha1.ClusterSecuritySummary {
-	summary := &securityv1alpha1.ClusterSecuritySummary{
-		NodesScanned: len(nodeVulnerabilities),
-	}
-
-	// Count CVEs and nodes with critical/high vulns
-	for _, node := range nodeVulnerabilities {
-		summary.TotalCVEs += node.Summary.Total
-		summary.FixableCVEs += node.Summary.FixableTotal
-
-		hasCritical := node.Summary.Critical != nil && node.Summary.Critical.Total > 0
-		hasHigh := node.Summary.High != nil && node.Summary.High.Total > 0
-
-		if hasCritical {
-			summary.NodesWithCritical++
-		}
-		if hasHigh {
-			summary.NodesWithHigh++
-		}
-	}
-
-	return summary
-}
 
 // syncAlertsIndividual syncs alerts as individual Alert CRDs
 func (r *ResultsExporterReconciler) syncAlertsIndividual(ctx context.Context, exporter *resultsv1alpha1.ResultsExporter, centralClient *central.Client) (int, error) {
@@ -1492,11 +1366,6 @@ func (r *ResultsExporterReconciler) cleanupAllManagedResources(ctx context.Conte
 	// Delete all StackRoxResults resources
 	if err := r.DeleteAllOf(ctx, &securityv1alpha1.StackRoxResults{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
 		logger.Error(err, "Failed to delete StackRoxResults resources")
-	}
-
-	// Delete all ClusterSecurityResults resources
-	if err := r.DeleteAllOf(ctx, &securityv1alpha1.ClusterSecurityResults{}, labelSelector); err != nil && !apierrors.IsNotFound(err) {
-		logger.Error(err, "Failed to delete ClusterSecurityResults resources")
 	}
 
 	logger.Info("Completed cleanup of all managed resources")
@@ -1910,11 +1779,6 @@ func (r *ResultsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&securityv1alpha1.StackRoxResults{},
 			handler.EnqueueRequestsFromMapFunc(r.mapStackRoxResultsToExporter),
 		).
-		// Watch ClusterSecurityResults - reconcile the owning exporter when they change
-		Watches(
-			&securityv1alpha1.ClusterSecurityResults{},
-			handler.EnqueueRequestsFromMapFunc(r.mapClusterSecurityResultsToExporter),
-		).
 		Named("resultsexporter").
 		Complete(r)
 }
@@ -1943,26 +1807,3 @@ func (r *ResultsExporterReconciler) mapStackRoxResultsToExporter(ctx context.Con
 	}
 }
 
-// mapClusterSecurityResultsToExporter maps a ClusterSecurityResults CR to its owning ResultsExporter
-func (r *ResultsExporterReconciler) mapClusterSecurityResultsToExporter(ctx context.Context, obj client.Object) []reconcile.Request {
-	csr, ok := obj.(*securityv1alpha1.ClusterSecurityResults)
-	if !ok {
-		return nil
-	}
-
-	// Get exporter name from label
-	exporterName := csr.Labels["results.stackrox.io/exporter"]
-	if exporterName == "" {
-		return nil
-	}
-
-	// Return reconcile request for the exporter
-	// Note: ResultsExporter is cluster-scoped, so namespace is empty
-	return []reconcile.Request{
-		{
-			NamespacedName: client.ObjectKey{
-				Name: exporterName,
-			},
-		},
-	}
-}
