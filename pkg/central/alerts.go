@@ -51,9 +51,9 @@ func (c *Client) ListAlerts(ctx context.Context, opts ListAlertsOptions) ([]*sto
 
 	if opts.MinSeverity != "" {
 		severityLevels := getSeverityLevelsAbove(opts.MinSeverity)
-		for _, sev := range severityLevels {
-			filters = append(filters, fmt.Sprintf("Severity:%s", sev))
-		}
+		// Use regex to create OR condition instead of AND
+		pattern := strings.Join(severityLevels, "|")
+		filters = append(filters, fmt.Sprintf("Severity:r/(%s)", pattern))
 	}
 
 	if len(opts.LifecycleStages) > 0 {

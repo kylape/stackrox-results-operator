@@ -55,7 +55,10 @@ func (c *Client) ListImages(ctx context.Context, opts ListImageVulnerabilitiesOp
 	}
 
 	if opts.MinSeverity != "" {
-		filters = append(filters, fmt.Sprintf("CVE Severity:%s", opts.MinSeverity))
+		cveSeverities := getCVESeverityLevelsAbove(opts.MinSeverity)
+		// Use regex to create OR condition instead of AND
+		pattern := strings.Join(cveSeverities, "|")
+		filters = append(filters, fmt.Sprintf("CVE Severity:r/(%s)", pattern))
 	}
 
 	if opts.FixableOnly {
@@ -207,12 +210,10 @@ func (c *Client) ListNodeVulnerabilities(ctx context.Context, minSeverity string
 		// Build query for filtering
 		query := url.Values{}
 		if minSeverity != "" {
-			severityLevels := getSeverityLevelsAbove(minSeverity)
-			filters := []string{}
-			for _, sev := range severityLevels {
-				filters = append(filters, fmt.Sprintf("CVE Severity:%s", sev))
-			}
-			query.Set("query", strings.Join(filters, "+"))
+			cveSeverities := getCVESeverityLevelsAbove(minSeverity)
+			// Use regex to create OR condition instead of AND
+			pattern := strings.Join(cveSeverities, "|")
+			query.Set("query", fmt.Sprintf("CVE Severity:r/(%s)", pattern))
 		}
 
 		if len(query) > 0 {
@@ -685,4 +686,42 @@ func generateNodeVulnName(nodeName string) string {
 	name = strings.ReplaceAll(name, "_", "-")
 
 	return fmt.Sprintf("node-%s", name)
+}
+
+// getCVESeverityLevelsAbove maps alert severity terminology (MEDIUM/HIGH/CRITICAL) to
+// CVE severity terminology (MODERATE/IMPORTANT/CRITICAL) and returns all severities
+// at or above the specified minimum
+func getCVESeverityLevelsAbove(minSeverity string) []string {
+	// Map alert severity names to CVE severity names
+	alertToCVE := map[string]string{
+		"LOW":      "LOW",
+		"MEDIUM":   "MODERATE",
+		"HIGH":     "IMPORTANT",
+		"CRITICAL": "CRITICAL",
+	}
+
+	// Severity levels (using CVE terminology)
+	severities := map[string]int{
+		"LOW":      1,
+		"MODERATE": 2,
+		"IMPORTANT": 3,
+		"CRITICAL": 4,
+	}
+
+	// Convert alert severity to CVE severity
+	cveSeverity := alertToCVE[minSeverity]
+	if cveSeverity == "" {
+		cveSeverity = minSeverity // Fallback to original if not found
+	}
+
+	minLevel := severities[cveSeverity]
+	result := []string{}
+
+	for sev, level := range severities {
+		if level >= minLevel {
+			result = append(result, sev)
+		}
+	}
+
+	return result
 }
